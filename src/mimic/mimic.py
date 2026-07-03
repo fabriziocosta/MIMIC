@@ -203,6 +203,7 @@ class MIMIC(BaseEstimator, TransformerMixin):
 
         self.train_embeddings_ = self.transform(X)
         self.embedding_slices_ = self._embedding_slices_
+        self._fit_conditional_samplers()
         self.policy_ = self._new_policy()
         self.policy_.validate()
         self.neighbour_index_ = self._fit_neighbours(self.train_embeddings_)
@@ -299,6 +300,7 @@ class MIMIC(BaseEstimator, TransformerMixin):
             if self.policy_.method == "smote":
                 h_new = (1.0 - lam) * H[anchor_pos] + lam * H[neigh_pos]
                 trace = {
+                    "trace_type": "embedding",
                     "sample_index": sample_index,
                     "method": "smote",
                     "anchor_index": self.train_index_[anchor_pos],
@@ -314,6 +316,7 @@ class MIMIC(BaseEstimator, TransformerMixin):
                 to_pos = self._choose_neighbour(from_pos, rng, condition_mask=condition_mask)
                 h_new = H[anchor_pos] + lam * (H[to_pos] - H[from_pos])
                 trace = {
+                    "trace_type": "embedding",
                     "sample_index": sample_index,
                     "method": "displacement",
                     "anchor_index": self.train_index_[anchor_pos],
@@ -335,6 +338,16 @@ class MIMIC(BaseEstimator, TransformerMixin):
             for column, value in condition.items():
                 if column in X_new.columns:
                     X_new[column] = value
+        if self._has_stochastic_decoders():
+            X_new, cell_traces = self._gibbs_sample_decoded(
+                H_new,
+                X_new,
+                condition=condition,
+                rng=rng,
+                n_sweeps=3,
+                return_trace=return_trace,
+            )
+            traces.extend(cell_traces)
         if return_trace:
             return X_new, pd.DataFrame(traces)
         return X_new
@@ -472,6 +485,95 @@ class MIMIC(BaseEstimator, TransformerMixin):
                 pred_codes = np.argmax(np.stack(probas, axis=0).mean(axis=0), axis=1)
                 data[column] = module.label_encoder.inverse_transform(pred_codes)
         return pd.DataFrame(data)
+
+    def _fit_conditional_samplers(self):
+        for column, module in self.feature_modules_.items():
+            sl = self.embedding_slices_[column]
+            observed_pos = np.flatnonzero(module.observed_mask.to_numpy())
+            if len(observed_pos) == 0:
+                continue
+            H_context = self._without_slice(self.train_embeddings_[observed_pos], sl)
+            y_observed = self.train_X_.iloc[observed_pos][column]
+            if module.task == "classification":
+                y = module.label_encoder.transform(y_observed.astype(str))
+            else:
+                y = module.target_scaler.transform(y_observed.astype(float).to_numpy().reshape(-1, 1)).ravel()
+            train_indices = self.train_index_[observed_pos].to_numpy()
+            for member in module.members:
+                if hasattr(member.decoder, "fit_sampler_target"):
+                    member.decoder.fit_sampler_target(column, module.task, H_context, y, train_indices=train_indices)
+
+    def _has_stochastic_decoders(self):
+        for column, module in self.feature_modules_.items():
+            for member in module.members:
+                if hasattr(member.decoder, "can_sample_target") and member.decoder.can_sample_target(column):
+                    return True
+        return False
+
+    def _gibbs_sample_decoded(self, H, X, condition, rng, n_sweeps: int, return_trace: bool):
+        X = X.copy()
+        condition = condition or {}
+        traces = []
+        for sweep in range(n_sweeps):
+            for column, module in self.feature_modules_.items():
+                if column in condition:
+                    X[column] = condition[column]
+                    continue
+                member_index, member = self._sampleable_member(module, column, rng)
+                if member is None:
+                    continue
+                H_context = self._without_slice(H, self.embedding_slices_[column])
+                sampled, sample_traces = member.decoder.sample_target(
+                    column,
+                    module.task,
+                    H_context,
+                    rng,
+                    return_trace=True,
+                )
+                if module.task == "regression":
+                    values = self._inverse_regression_target(sampled, module.target_scaler)
+                    X[column] = values
+                else:
+                    codes = np.asarray(sampled, dtype=int)
+                    values = module.label_encoder.inverse_transform(codes)
+                    X[column] = values
+                if return_trace:
+                    for row_pos, detail in enumerate(sample_traces):
+                        trace = {
+                            "trace_type": "cell",
+                            "sample_index": row_pos,
+                            "method": "gibbs_forest",
+                            "sweep": sweep,
+                            "column": column,
+                            "task": module.task,
+                            "sampled_value": X.iloc[row_pos][column],
+                            "conditioning": "z_minus_j",
+                            "embedding_slice_start": self.embedding_slices_[column].start,
+                            "embedding_slice_stop": self.embedding_slices_[column].stop,
+                            "member_index": member_index,
+                            "condition": json.dumps(condition, sort_keys=True) if condition else None,
+                            "decoder": member.decoder.__class__.__name__,
+                        }
+                        trace.update(detail)
+                        traces.append(trace)
+        for column, value in condition.items():
+            if column in X.columns:
+                X[column] = value
+        return X, traces
+
+    def _sampleable_member(self, module: FeatureModule, column: str, rng):
+        candidates = [
+            (i, member)
+            for i, member in enumerate(module.members)
+            if hasattr(member.decoder, "can_sample_target") and member.decoder.can_sample_target(column)
+        ]
+        if not candidates:
+            return None, None
+        return candidates[int(rng.integers(0, len(candidates)))]
+
+    @staticmethod
+    def _without_slice(H, sl):
+        return np.hstack([H[:, : sl.start], H[:, sl.stop :]])
 
     def _aligned_predict_proba(self, member: BootstrapMember, module: FeatureModule, column: str, H):
         proba = member.decoder.predict_proba_target(column, H)

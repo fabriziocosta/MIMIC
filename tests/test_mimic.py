@@ -7,6 +7,7 @@ import pandas as pd
 from scipy import sparse
 
 from mimic import (
+    ForestConditionalSampler,
     GenerationPolicy,
     LinearMixedFeatureDecoder,
     MIMIC,
@@ -76,6 +77,26 @@ def test_linear_mixed_feature_decoder_regression_and_classification():
     assert set(decoder.predict_target("y", H)).issubset({"high", "low"})
     assert decoder.predict_proba_target("y", H).shape == (40, 2)
     assert isinstance(MixedFeatureDecoder.linear(), LinearMixedFeatureDecoder)
+
+
+def test_forest_conditional_sampler_samples_with_trace():
+    rng = np.random.default_rng(0)
+    H = rng.normal(size=(50, 3))
+    y_reg = np.linspace(-2.0, 2.0, 50)
+    y_cls = np.array([0, 1] * 25)
+    sampler = ForestConditionalSampler(n_estimators=10, random_state=0)
+    sampler.fit_target("x", "regression", H, y_reg)
+    sampler.fit_sampler_target("x", "regression", H, y_reg, train_indices=np.arange(100, 150))
+    sampler.fit_target("c", "classification", H, y_cls)
+    sampler.fit_sampler_target("c", "classification", H, y_cls)
+
+    reg_values, reg_trace = sampler.sample_target("x", "regression", H[:5], rng, return_trace=True)
+    cls_values, cls_trace = sampler.sample_target("c", "classification", H[:5], rng, return_trace=True)
+
+    assert set(reg_values).issubset(set(y_reg))
+    assert {"source_index", "source_weight", "leaf_support_size"}.issubset(reg_trace[0])
+    assert set(cls_values).issubset({0, 1})
+    assert "class_probabilities" in cls_trace[0]
 
 
 def test_mimic_fit_transform_impute_confidence_sample_plot():
@@ -177,6 +198,27 @@ def test_sample_condition_restricts_anchor_rows():
     assert set(anchor_segments) == {"older"}
     assert samples["segment"].eq("older").all()
     assert trace["condition"].eq('{"segment": "older"}').all()
+
+
+def test_mimic_sample_with_forest_conditional_sampler_has_cell_trace():
+    df = make_frame(n=45)
+    model = MIMIC(
+        ignore_columns=["id"],
+        regression_columns=["age", "income"],
+        classification_columns=["segment", "outcome"],
+        encoder=RandomForestPathEncoder(n_estimators=5, embedding_dim=4, random_state=6),
+        decoder=ForestConditionalSampler(n_estimators=8, random_state=6),
+        policy=GenerationPolicy(method="displacement", n_neighbors=3),
+        n_bootstrap=1,
+        random_state=6,
+    ).fit(df)
+
+    samples, trace = model.sample(4, condition={"segment": "older"}, return_trace=True)
+    cell_trace = trace[trace["trace_type"] == "cell"]
+    assert samples["segment"].eq("older").all()
+    assert not cell_trace.empty
+    assert {"sweep", "column", "sampled_value", "conditioning"}.issubset(cell_trace.columns)
+    assert cell_trace["conditioning"].eq("z_minus_j").all()
 
 
 def test_classification_probability_alignment_when_bootstrap_misses_class():
