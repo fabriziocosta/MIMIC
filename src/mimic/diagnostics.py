@@ -94,7 +94,13 @@ def pairwise_feature_plot(
         diag_kind="hist",
         height=2.2,
         plot_kws={"alpha": 0.45, "s": 18, "edgecolor": "none"},
-        diag_kws={"alpha": 0.45, "common_norm": False, "log_scale": (False, True)},
+        diag_kws={
+            "alpha": 0.75,
+            "common_norm": False,
+            "element": "step",
+            "fill": False,
+            "log_scale": (False, True),
+        },
     )
 
 
