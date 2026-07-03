@@ -135,6 +135,25 @@ def test_mimic_with_linear_mixed_feature_decoder():
     assert not imputed[["age", "outcome"]].isna().any().any()
 
 
+def test_classification_probability_alignment_when_bootstrap_misses_class():
+    df = make_frame(n=60)
+    df["rare"] = "common"
+    df.loc[0, "rare"] = "rare"
+    model = MIMIC(
+        ignore_columns=["id"],
+        regression_columns=["age", "income"],
+        classification_columns=["segment", "outcome", "rare"],
+        encoder=RandomForestPathEncoder(n_estimators=4, embedding_dim=3, random_state=3),
+        decoder=MixedFeatureDecoder.random_forest(n_estimators=4, random_state=3),
+        n_bootstrap=1,
+        random_state=3,
+    ).fit(df)
+
+    conf = model.confidence(df.head(5), columns=["rare"])
+    assert len(conf) == 5
+    assert conf["probabilities"].map(lambda x: set(x) == {"common", "rare"}).all()
+
+
 def test_missing_target_excluded_but_missing_context_allowed():
     df = make_frame(n=40)
     df.loc[0, "age"] = np.nan

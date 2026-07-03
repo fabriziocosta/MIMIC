@@ -383,7 +383,7 @@ class MIMIC(BaseEstimator, TransformerMixin):
         votes = []
         for member in module.members:
             H = self._member_embedding(member, module, X, max_width=member.embedding_dim)
-            p = member.decoder.predict_proba_target(column, H)
+            p = self._aligned_predict_proba(member, module, column, H)
             probas.append(p)
             votes.append(np.argmax(p, axis=1))
         p_arr = np.stack(probas, axis=0)
@@ -449,10 +449,27 @@ class MIMIC(BaseEstimator, TransformerMixin):
                 probas = []
                 for member in module.members:
                     b = self._to_2d(block, width=member.embedding_dim)[:, : member.embedding_dim]
-                    probas.append(member.decoder.predict_proba_target(column, b))
+                    probas.append(self._aligned_predict_proba(member, module, column, b))
                 pred_codes = np.argmax(np.stack(probas, axis=0).mean(axis=0), axis=1)
                 data[column] = module.label_encoder.inverse_transform(pred_codes)
         return pd.DataFrame(data)
+
+    def _aligned_predict_proba(self, member: BootstrapMember, module: FeatureModule, column: str, H):
+        proba = member.decoder.predict_proba_target(column, H)
+        model = member.decoder.models_[column]
+        model_classes = getattr(model, "classes_", np.arange(proba.shape[1]))
+        n_classes = len(module.classes_)
+        if len(model_classes) == n_classes and np.array_equal(model_classes, np.arange(n_classes)):
+            return proba
+        aligned = np.zeros((proba.shape[0], n_classes), dtype=float)
+        for local_idx, class_code in enumerate(model_classes):
+            aligned[:, int(class_code)] = proba[:, local_idx]
+        row_sums = aligned.sum(axis=1)
+        missing = row_sums == 0
+        if np.any(missing):
+            aligned[missing, :] = 1.0 / n_classes
+            row_sums = aligned.sum(axis=1)
+        return aligned / row_sums[:, None]
 
     def _validate_schema(self, X: pd.DataFrame):
         self.columns_ = list(X.columns)
