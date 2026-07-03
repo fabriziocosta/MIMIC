@@ -18,7 +18,7 @@ Third, it can treat ordinary **supervised learning** as a special case of imputa
 
 Fourth, MIMIC can act as a **synthetic data generator**. By moving through the learned embedding space, either by interpolation between neighbours or by local displacement vectors, the model can generate new plausible instances and decode them back into feature space.
 
-MIMIC is not a single algorithm in the narrow sense. It is a framework. The encoders may be random forests, gradient-boosted trees, neural networks, ResNets, transformers, or other models. The decoders may be classifiers, regressors, density estimators, calibrated probabilistic predictors, or task-specific heads. The defining feature is the organisation of these components into a universal column-wise predictive system with uncertainty-aware imputation and manifold-aware generation.
+MIMIC is not a single algorithm in the narrow sense. It is a framework. The current implementation provides random-forest and ResNet encoders, together with mixed regression/classification decoders. The defining feature is the organisation of these components into a universal column-wise predictive system with uncertainty-aware imputation and manifold-aware generation.
 
 ### 2. Background and motivation
 
@@ -36,17 +36,17 @@ Third, it treats **generation** as movement on a learned data manifold. Rather t
 
 ### 3. Core intuition
 
-Consider a dataset with rows as instances and columns as features. Some features may be numerical, some categorical, some ordinal, some binary, and some may be structured outputs.
+Consider a dataset with rows as instances and columns as features. Some features may be numerical and others categorical.
 
-For each feature column (x_j), MIMIC asks:
+For each feature column $x_j$, MIMIC asks:
 
 $$
 x_j \approx f_j(x_{-j})
 $$
 
-where (x_{-j}) denotes all features except (x_j).
+where $x_{-j}$ denotes all features except $x_j$.
 
-The model for (x_j) is trained using rows where (x_j) is observed. At prediction time, if (x_j) is missing, the model predicts it from the available values of the other columns.
+The model for $x_j$ is trained using rows where $x_j$ is observed. At prediction time, if $x_j$ is missing, the model predicts it from the available values of the other columns and an explicit missingness mask for any missing context values.
 
 The important addition is that MIMIC does not only produce a prediction. It also produces a representation:
 
@@ -54,13 +54,13 @@ $$
 h_j = E_j(x_{-j})
 $$
 
-where (E_j) is the encoder associated with predicting feature (j). These representations can be concatenated, pooled, attended over, or otherwise combined into a global representation of the instance:
+where $E_j$ is the encoder associated with predicting feature $j$. In the implementation, these feature-wise representations are concatenated into a global representation of the instance:
 
 $$
-H(x) = \mathrm{Combine}(h_1, h_2, ..., h_p)
+H(x) = [h_1, h_2, ..., h_p]
 $$
 
-When predicting feature (j), the decoder should not use the representation of (j) itself. It should use the representations induced by the other features:
+When predicting feature $j$, the decoder should not use the representation of $j$ itself. It should use the representations induced by the other features:
 
 $$
 \hat{x}_j = D_j(H_{-j})
@@ -74,19 +74,19 @@ MIMIC has four conceptual layers.
 
 #### 4.1 Feature-wise predictive modules
 
-For every feature (x_j), MIMIC learns a module that predicts (x_j) from all other features.
+For every feature $x_j$, MIMIC learns a module that predicts $x_j$ from all other features.
 
 Each module contains:
 
-1. an encoder (E_j), which maps the available context into an embedding;
-2. a decoder (D_j), which predicts the value of (x_j);
+1. an encoder $E_j$, which maps the available context into an embedding;
+2. a decoder $D_j$, which predicts the value of $x_j$;
 3. an uncertainty estimator, usually obtained through an ensemble.
 
-The encoder can be any model that exposes a useful internal representation. For a neural network, this may be the penultimate-layer embedding. For a tree ensemble, this may be the vector of leaf indices, path activations, node statistics, or learned proximity representation. For a transformer-style tabular model, it may be a contextual token representation.
+The current implementation provides two encoder families: a random-forest path/leaf encoder and a PyTorch ResNet encoder. The random-forest encoder can expose sparse path or leaf encodings, optionally reduced to a fixed dense dimensionality with truncated SVD. The ResNet encoder exposes a penultimate-layer embedding.
 
 #### 4.2 Global instance representation
 
-The feature-wise embeddings are combined into a global representation of the row. The simplest version concatenates all embeddings. More sophisticated versions may use pooling, attention, masking, graph aggregation, or learned feature interaction modules.
+The feature-wise embeddings are combined into a global representation of the row by concatenating all feature-wise embeddings.
 
 The global representation should preserve two kinds of information:
 
@@ -97,7 +97,7 @@ This makes the representation useful not only for imputation, but also for incon
 
 #### 4.3 Target-specific decoders
 
-For each feature (x_j), a target-specific decoder predicts (x_j) from the global representation excluding direct information from (x_j).
+For each feature $x_j$, a target-specific decoder predicts $x_j$ from the global representation excluding direct information from $x_j$.
 
 The decoder type depends on the target feature:
 
@@ -105,9 +105,7 @@ $$
 D_j =
 \begin{cases}
 \text{regressor}, & \text{if } x_j \text{ is continuous} \\
-\text{classifier}, & \text{if } x_j \text{ is categorical} \\
-\text{ordinal model}, & \text{if } x_j \text{ is ordinal} \\
-\text{structured decoder}, & \text{if } x_j \text{ is structured}
+\text{classifier}, & \text{if } x_j \text{ is categorical}
 \end{cases}
 $$
 
@@ -121,7 +119,7 @@ $$
 \hat{x}_{j}^{(1)}, \hat{x}_{j}^{(2)}, ..., \hat{x}_{j}^{(B)}
 $$
 
-From this distribution, MIMIC can compute uncertainty measures such as variance, entropy, disagreement, prediction intervals, or calibrated confidence scores.
+From this distribution, MIMIC can compute uncertainty measures such as variance, entropy, class-probability dispersion, vote disagreement, and confidence scores.
 
 This is particularly important because the model’s most useful output may not be the imputed value itself, but the confidence attached to that value.
 
@@ -131,7 +129,7 @@ MIMIC supports four main operating modes.
 
 #### 5.1 Missing-value imputation
 
-Given a row with a missing value in column (j), MIMIC predicts that value using all available non-(j) information.
+Given a row with a missing value in column $j$, MIMIC predicts that value using all available non-$j$ information.
 
 The output is:
 
@@ -139,17 +137,17 @@ $$
 (\hat{x}_j, u_j)
 $$
 
-where (\hat{x}_j) is the imputed value and (u_j) is an uncertainty score.
+where $\hat{x}_j$ is the imputed value and $u_j$ is an uncertainty score.
 
 This allows the downstream user to decide whether to accept the imputation automatically, mark it as provisional, or route it to human review.
 
-The method can also support iterative imputation. When multiple values are missing in the same row, MIMIC can impute the most confident missing entries first, update the row, and then proceed to less certain entries. This should be treated as a design option rather than a default guarantee, because iterative imputation can also propagate earlier mistakes if uncertainty is poorly calibrated.
+The implementation uses single-pass masked imputation. When multiple values are missing in the same row, MIMIC does not first fill other missing columns before predicting $x_j$. Instead, each feature module receives the available context values plus a missingness mask for the context columns. Rows with a missing target value are excluded when training that target module, but rows with missing context values are still usable.
 
 #### 5.2 Data repair and inconsistency checking
 
 MIMIC can also be used when values are present but potentially wrong.
 
-For an observed entry (x_j), the model predicts what (x_j) should be from the other features:
+For an observed entry $x_j$, the model predicts what $x_j$ should be from the other features:
 
 $$
 \hat{x}_j = D_j(H_{-j})
@@ -173,13 +171,13 @@ This distinction is important. A high-variance or low-probability entry may be a
 
 A supervised prediction problem can be represented as a missing-value problem.
 
-Suppose the dataset contains a target column (y). For the training set, (y) is observed. For the test set, (y) is missing. MIMIC treats the target as another feature column:
+Suppose the dataset contains a target column $y$. For the training set, $y$ is observed. For the test set, $y$ is missing. MIMIC treats the target as another feature column:
 
 $$
 y = x_j
 $$
 
-Training is performed on rows where (y) is observed. Prediction is imputation on rows where (y) is missing.
+Training is performed on rows where $y$ is observed. Prediction is imputation on rows where $y$ is missing.
 
 This gives a unified view of supervised learning, semi-supervised learning, and missing-value prediction. It also allows the same uncertainty mechanism used for imputation to be used for label prediction.
 
@@ -191,13 +189,13 @@ There are two proposed policies.
 
 #### Policy A: neighbour interpolation
 
-Given an instance (A), compute its embedding (H(A)). Find a neighbour (B) in embedding space. Generate a new latent point by interpolation:
+Given an instance $A$, compute its embedding $H(A)$. Find a neighbour $B$ in embedding space. Generate a new latent point by interpolation:
 
 $$
 H_{\mathrm{new}} = (1 - \lambda)H(A) + \lambda H(B)
 $$
 
-where (\lambda \in [0,1]).
+where $\lambda$ is sampled from the configured `lambda_range`, which defaults to $[0,1]$.
 
 The new embedding is then decoded into feature space:
 
@@ -209,16 +207,16 @@ This is analogous in spirit to SMOTE, which generates synthetic minority-class e
 
 #### Policy B: local displacement transfer
 
-Given an instance (A), find a nearby instance (B). Then find a neighbour (C) of (B). Compute the local displacement:
+Given an instance $A$, find a nearby instance $B$. Then find a neighbour $C$ of $B$. Compute the local displacement:
 
 $$
 \Delta = H(C) - H(B)
 $$
 
-Apply this displacement to (A):
+Apply a scaled version of this displacement to $A$:
 
 $$
-H_{\mathrm{new}} = H(A) + \Delta
+H_{\mathrm{new}} = H(A) + \lambda\Delta
 $$
 
 Then decode:
@@ -227,13 +225,13 @@ $$
 x_{\mathrm{new}} = D(H_{\mathrm{new}})
 $$
 
-The intuition is that the displacement (C - B) captures a locally valid direction of variation on the data manifold. Applying that displacement to (A) may generate a new point that remains close to the local structure of the data.
+The intuition is that the displacement $C - B$ captures a locally valid direction of variation on the data manifold. Applying a scaled version of that displacement to $A$ may generate a new point that remains close to the local structure of the data.
 
 This is a hypothesis to be tested empirically. The method is attractive because it tries to generate variation by borrowing local transformations rather than by adding arbitrary noise.
 
 #### 5.5 Addressable and traceable generation
 
-A further design principle in MIMIC is that synthetic generation should be **addressable**. A generated instance should not appear as an anonymous output of the model. It should carry a provenance record that identifies the source training instances, the generation policy, the embedding space, the decoder, and the parameters that produced it.
+A further design principle in MIMIC is that synthetic generation should be **addressable**. A generated instance should not appear as an anonymous output of the model. It should carry a provenance record that identifies the source training instances, the generation policy, the decoder, and the parameters that produced it.
 
 This makes generation auditable, controllable, and scientifically interpretable. If a generated row looks unrealistic, the source instances can be inspected. If a user wants only conservative synthetic data, generated rows can be filtered according to source quality, class membership, local density, uncertainty, or neighbour relation. Rather than treating synthetic data as an opaque cloud of samples, MIMIC can expose the local transformation that produced each sample.
 
@@ -244,22 +242,22 @@ $$
 (\text{mode}=\text{interpolation}, A, B, \lambda)
 $$
 
-where (A) and (B) are the source instances and (\lambda) gives the position of the generated point between them in embedding space. For example, (\lambda = 0.25) produces a point closer to (A), while (\lambda = 0.5) produces a midpoint between (A) and (B). This allows the decoded row to be inspected as a plausible intermediate case between two observed rows.
+where $A$ and $B$ are the source instances and $\lambda$ gives the position of the generated point between them in embedding space. For example, $\lambda = 0.25$ produces a point closer to $A$, while $\lambda = 0.5$ produces a midpoint between $A$ and $B$. This allows the decoded row to be inspected as a plausible intermediate case between two observed rows.
 
 For local displacement, the provenance record is:
 
 $$
 \mathrm{Prov}(x_{\mathrm{new}}) =
-(\text{mode}=\text{displacement}, A, B, C, \alpha)
+(\text{mode}=\text{displacement}, A, B, C, \lambda)
 $$
 
-where (B) and (C) define the displacement direction and (A) is the anchor to which that displacement is applied:
+where $B$ and $C$ define the displacement direction and $A$ is the anchor to which that displacement is applied:
 
 $$
-H_{\mathrm{new}} = H(A) + \alpha(H(C) - H(B))
+H_{\mathrm{new}} = H(A) + \lambda(H(C) - H(B))
 $$
 
-The parameter (\alpha) controls how much of the displacement is applied. A conservative implementation may restrict (\alpha \in [0,1]), while exploratory variants may allow a wider real-valued range. In either case, MIMIC is not simply sampling arbitrary noise around (A). It is applying a controlled fraction of a locally observed transformation.
+The parameter $\lambda$ controls how much of the displacement is applied. It is sampled from the same configured `lambda_range` used for interpolation. MIMIC is not simply sampling arbitrary noise around $A$; it is applying a controlled fraction of a locally observed transformation.
 
 Addressability also supports stricter neighbour policies. Interpolation and displacement may use ordinary nearest neighbours, or a stronger **mutual-neighbour** criterion:
 
@@ -269,7 +267,7 @@ B \in \mathcal{N}_k(A)
 A \in \mathcal{N}_k(B)
 $$
 
-For interpolation, this requires (A) and (B) to be mutual neighbours before MIMIC generates between them. For displacement, the minimal mutual-neighbour restriction requires (B) and (C) to be mutual neighbours because their difference vector defines the displacement. Stricter versions can also require compatibility between (A) and the region from which the displacement is borrowed, for example by requiring that (A), (B), and (C) share a class label, cluster assignment, density region, or local chart.
+For interpolation, this requires $A$ and $B$ to be mutual neighbours before MIMIC generates between them. For displacement, the implemented mutual-neighbour check applies to $B$ and $C$ because their difference vector defines the displacement.
 
 The generation record can therefore include fields such as:
 
@@ -281,7 +279,6 @@ g =
 \text{generation parameters},
 \text{neighbour type},
 \text{restriction},
-\text{embedding space},
 \text{decoder}
 }
 $$
@@ -292,12 +289,12 @@ This record makes each generated row reproducible, auditable, and filterable. It
 
 If one column represents a class label, MIMIC can condition generation on a class value.
 
-For example, if class (c) is underrepresented, MIMIC can:
+For example, if class $c$ is underrepresented, MIMIC can:
 
-1. select instances from class (c);
+1. select instances from class $c$;
 2. generate new embeddings by interpolation or local displacement;
 3. decode them into new synthetic feature vectors;
-4. retain only synthetic instances predicted to belong to class (c) with sufficient confidence.
+4. retain only synthetic instances predicted to belong to class $c$ with sufficient confidence.
 
 This gives MIMIC a role as a class-balancing generator. The generated examples should be evaluated carefully, because synthetic oversampling can improve apparent classifier performance while also introducing artefacts if the generator does not preserve the true data distribution.
 
@@ -367,7 +364,7 @@ Baselines should include simple statistical imputation, chained-equation models,
 
 Inject controlled corruptions into known entries and test whether MIMIC ranks corrupted entries above clean entries.
 
-Relevant metrics include precision at (k), average precision, AUROC, and workload reduction. Workload reduction measures how many human checks are avoided by prioritising the most suspicious entries first.
+Relevant metrics include precision at $k$, average precision, AUROC, and workload reduction. Workload reduction measures how many human checks are avoided by prioritising the most suspicious entries first.
 
 #### 9.3 Supervised prediction
 
@@ -389,9 +386,9 @@ MIMIC raises several important research questions.
 
 First, what is the best representation for tree-based encoders? Neural networks expose natural hidden-layer embeddings, but tree ensembles require a principled representation, such as leaf-index vectors, path indicators, proximity embeddings, or learned embeddings over tree paths.
 
-Second, should the global representation be a simple concatenation, or should it use attention over feature embeddings? Concatenation is simple and transparent, but attention may better model conditional dependence between features.
+Second, how well does the concatenated global representation preserve local neighbourhood structure? Concatenation is simple and transparent, but its usefulness depends on the quality and scale of the feature-wise embeddings.
 
-Third, how should MIMIC handle rows with many missing values? The model may need masking-aware encoders, iterative refinement, or confidence-ordered imputation.
+Third, how robust is single-pass masked imputation when rows contain many missing values? The implemented approach avoids circular dependencies, but its performance depends on how well the encoders and decoders use missingness indicators.
 
 Fourth, how should uncertainty be calibrated? Raw ensemble variance is useful, but it may not be sufficient. Calibration methods may be needed before uncertainty scores are used for high-stakes decisions.
 
