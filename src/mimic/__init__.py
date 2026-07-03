@@ -1,6 +1,6 @@
 """MIMIC public API."""
 
-from .decoders import ForestConditionalSampler, IdentityDecoder, LinearMixedFeatureDecoder, MixedFeatureDecoder
+from .decoders import ForestConditionalSampler, IdentityDecoder, LinearMixedFeatureDecoder, MixedFeatureDecoder, NeuralConditionalSampler
 from .encoders import IdentityEncoder, RandomForestPathEncoder, ResNetEncoder
 from .mimic import MIMIC
 from .policies import GenerationPolicy
@@ -13,6 +13,7 @@ __all__ = [
     "LinearMixedFeatureDecoder",
     "MIMIC",
     "MixedFeatureDecoder",
+    "NeuralConditionalSampler",
     "RandomForestPathEncoder",
     "ResNetEncoder",
 ]

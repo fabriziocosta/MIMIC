@@ -14,6 +14,7 @@ from mimic import (
     LinearMixedFeatureDecoder,
     MIMIC,
     MixedFeatureDecoder,
+    NeuralConditionalSampler,
     RandomForestPathEncoder,
     ResNetEncoder,
 )
@@ -117,6 +118,85 @@ def test_forest_conditional_sampler_samples_with_trace():
     assert {"source_index", "source_weight", "leaf_support_size"}.issubset(reg_trace[0])
     assert set(cls_values).issubset({0, 1})
     assert "class_probabilities" in cls_trace[0]
+
+
+def test_mdn_negative_log_likelihood_gradients_and_matching_component():
+    import torch
+
+    from mimic.decoders import mdn_negative_log_likelihood
+
+    y = torch.tensor([0.0, 2.0], dtype=torch.float32)
+    logits = torch.zeros((2, 2), dtype=torch.float32, requires_grad=True)
+    matching_mu = torch.tensor([[0.0, 5.0], [5.0, 2.0]], dtype=torch.float32, requires_grad=True)
+    poor_mu = torch.tensor([[5.0, 6.0], [5.0, 6.0]], dtype=torch.float32, requires_grad=True)
+    raw_sigma = torch.zeros((2, 2), dtype=torch.float32, requires_grad=True)
+
+    matching_loss = mdn_negative_log_likelihood(logits, matching_mu, raw_sigma, y)
+    poor_loss = mdn_negative_log_likelihood(logits.detach(), poor_mu, raw_sigma.detach(), y)
+    matching_loss.backward()
+
+    assert torch.isfinite(matching_loss)
+    assert matching_loss < poor_loss
+    assert logits.grad is not None
+    assert matching_mu.grad is not None
+    assert raw_sigma.grad is not None
+
+
+def test_neural_conditional_sampler_regression_and_classification_trace():
+    rng = np.random.default_rng(0)
+    H = rng.normal(size=(50, 3))
+    y_reg = H[:, 0] - 0.5 * H[:, 1]
+    y_cls = np.where(H[:, 2] > 0, 1, 0)
+    sampler = NeuralConditionalSampler(
+        n_components=3,
+        hidden_dim=12,
+        n_layers=1,
+        max_epochs=6,
+        patience=3,
+        batch_size=16,
+        random_state=0,
+        device="cpu",
+    )
+    sampler.fit_target("x", "regression", H, y_reg)
+    sampler.fit_sampler_target("x", "regression", H, y_reg)
+    sampler.fit_target("c", "classification", H, y_cls)
+    sampler.fit_sampler_target("c", "classification", H, y_cls)
+
+    pred = sampler.predict_target("x", H[:5])
+    reg_values, reg_trace = sampler.sample_target("x", "regression", H[:5], rng, return_trace=True)
+    cls_values, cls_trace = sampler.sample_target("c", "classification", H[:5], rng, return_trace=True)
+
+    assert pred.shape == (5,)
+    assert reg_values.shape == (5,)
+    assert {"component_index", "component_probability", "component_mean", "component_sigma", "sample_log_probability"}.issubset(reg_trace[0])
+    assert set(cls_values).issubset({0, 1})
+    assert "class_probabilities" in cls_trace[0]
+
+
+def test_neural_conditional_sampler_mdn_samples_both_numeric_modes():
+    rng = np.random.default_rng(1)
+    H = np.zeros((80, 2), dtype=float)
+    y = np.r_[np.full(40, -2.0), np.full(40, 2.0)]
+    sampler = NeuralConditionalSampler(
+        n_components=2,
+        hidden_dim=16,
+        n_layers=1,
+        max_epochs=40,
+        patience=8,
+        batch_size=20,
+        min_sigma=0.05,
+        max_sigma=1.0,
+        noise_scale=0.25,
+        random_state=1,
+        device="cpu",
+    )
+    sampler.fit_target("x", "regression", H, y)
+    sampler.fit_sampler_target("x", "regression", H, y)
+
+    samples = sampler.sample_target("x", "regression", np.zeros((120, 2)), rng)
+
+    assert (samples < -0.75).sum() >= 10
+    assert (samples > 0.75).sum() >= 10
 
 
 def test_mimic_fit_transform_impute_confidence_sample_plot():
@@ -292,6 +372,39 @@ def test_mimic_sample_with_forest_conditional_sampler_has_cell_trace():
     assert not cell_trace.empty
     assert {"sweep", "column", "sampled_value", "conditioning"}.issubset(cell_trace.columns)
     assert cell_trace["conditioning"].eq("z_minus_j").all()
+
+
+def test_mimic_sample_with_neural_conditional_sampler_has_mdn_cell_trace():
+    df = make_frame(n=42)
+    model = MIMIC(
+        ignore_columns=["id"],
+        regression_columns=["age", "income"],
+        classification_columns=["segment", "outcome"],
+        encoder=RandomForestPathEncoder(n_estimators=4, embedding_dim=3, random_state=8),
+        decoder=NeuralConditionalSampler(
+            n_components=2,
+            hidden_dim=10,
+            n_layers=1,
+            max_epochs=4,
+            patience=2,
+            batch_size=16,
+            random_state=8,
+            device="cpu",
+        ),
+        policy=GenerationPolicy(method="displacement", n_neighbors=3),
+        n_bootstrap=1,
+        random_state=8,
+    ).fit(df)
+
+    samples, trace = model.sample(3, condition={"segment": "older"}, return_trace=True)
+    cell_trace = trace[trace["trace_type"] == "cell"]
+    numeric_trace = cell_trace[cell_trace["task"] == "regression"]
+
+    assert samples.shape == (3, 4)
+    assert samples["segment"].eq("older").all()
+    assert not cell_trace.empty
+    assert {"component_index", "component_probability", "component_mean", "component_sigma", "sample_log_probability"}.issubset(numeric_trace.columns)
+    assert numeric_trace["conditioning"].eq("z_minus_j").all()
 
 
 def test_classification_probability_alignment_when_bootstrap_misses_class():

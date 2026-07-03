@@ -32,6 +32,11 @@ conditional samplers for each feature using `z_{-j}` embedding context, then
 `MIMIC.sample(..., return_trace=True)` returns both embedding-generation trace
 rows and per-cell Gibbs sampling trace rows.
 
+Use `NeuralConditionalSampler(...)` for the same stochastic generation contract
+with neural conditional samplers. Numeric sampler targets use mixture density
+network negative log likelihood, so generated numeric cells can be sampled from
+multimodal conditional distributions.
+
 Use `IdentityEncoder()` with `IdentityDecoder()` for baseline generation in the
 preprocessed original feature space. With `GenerationPolicy(method="smote")`,
 this recovers a classical SMOTE-style interpolation baseline; with

@@ -11,8 +11,15 @@ ORIGINAL_MAJORITY_COLOR = "#9aa0a6"
 ORIGINAL_MINORITY_COLOR = "#1f77b4"
 
 
-def make_two_spiral_frame(random_state: int = 2) -> pd.DataFrame:
+def make_two_spiral_frame(
+    majority_samples: int = 180,
+    minority_samples: int = 90,
+    random_state: int = 2,
+) -> pd.DataFrame:
     """Create the undersampled two-spiral demo frame used by generation notebooks."""
+
+    if minority_samples > majority_samples:
+        raise ValueError("minority_samples cannot exceed majority_samples")
 
     rng = np.random.default_rng(random_state)
 
@@ -23,9 +30,9 @@ def make_two_spiral_frame(random_state: int = 2) -> pd.DataFrame:
         y = radius * np.sin(theta + phase) + rng.normal(0, noise, n)
         return pd.DataFrame({"x": x, "y": y, "label": label})
 
-    majority = make_spiral("majority", 180, phase=0.0)
-    minority_full = make_spiral("minority", 180, phase=np.pi)
-    minority = minority_full.sample(n=90, random_state=random_state).sort_index().reset_index(drop=True)
+    majority = make_spiral("majority", majority_samples, phase=0.0)
+    minority_full = make_spiral("minority", majority_samples, phase=np.pi)
+    minority = minority_full.sample(n=minority_samples, random_state=random_state).sort_index().reset_index(drop=True)
     df = pd.concat([majority, minority], ignore_index=True)
     df["id"] = np.arange(len(df))
     return df
@@ -67,8 +74,8 @@ def cell_sampling_trace(trace: pd.DataFrame) -> pd.DataFrame:
     return trace.loc[trace["trace_type"].eq("cell")].dropna(axis=1, how="all")
 
 
-def plot_oversampling(df: pd.DataFrame, generated: pd.DataFrame, title: str = "Displacement oversampling on undersampled two spirals"):
-    """Plot original rows and generated rows with generated points as red filled circles."""
+def plot_oversampling(df: pd.DataFrame, generated: pd.DataFrame, title: str = "Displacement oversampling"):
+    """Plot original/generated oversampling views in one row."""
 
     plot_df = pd.concat(
         [
@@ -78,22 +85,36 @@ def plot_oversampling(df: pd.DataFrame, generated: pd.DataFrame, title: str = "D
         ignore_index=True,
     )
 
-    fig, ax = plt.subplots(figsize=(6, 5))
-    for (source, label), part in plot_df.groupby(["source", "label"]):
-        if source == "original" and label == "majority":
-            color, alpha, size = ORIGINAL_MAJORITY_COLOR, 0.42, 28
-        elif source == "original" and label == "minority":
-            color, alpha, size = ORIGINAL_MINORITY_COLOR, 0.9, 46
-        else:
-            color, alpha, size = GENERATED_COLOR, 0.9, 52
-        ax.scatter(part["x"], part["y"], label=f"{source} {label}", color=color, marker="o", alpha=alpha, s=size)
-    ax.set_title(title)
-    ax.set_xlabel("x")
-    ax.set_ylabel("y")
-    ax.set_aspect("equal", adjustable="box")
-    ax.legend(frameon=False)
+    fig, axes = plt.subplots(1, 3, figsize=(15, 4.6), sharex=True, sharey=True)
+
+    panels = [
+        (plot_df, title),
+        (plot_df[plot_df["source"].eq("original")], "Original majority and minority"),
+        (
+            plot_df[
+                (plot_df["source"].eq("generated") & plot_df["label"].eq("minority"))
+                | (plot_df["source"].eq("original") & plot_df["label"].eq("majority"))
+            ],
+            "Original majority and generated minority",
+        ),
+    ]
+
+    for ax, (panel_df, panel_title) in zip(axes, panels):
+        for (source, label), part in panel_df.groupby(["source", "label"], sort=False):
+            if source == "original" and label == "majority":
+                color, alpha, size = ORIGINAL_MAJORITY_COLOR, 0.42, 28
+            elif source == "original" and label == "minority":
+                color, alpha, size = ORIGINAL_MINORITY_COLOR, 0.9, 46
+            else:
+                color, alpha, size = GENERATED_COLOR, 0.9, 52
+            ax.scatter(part["x"], part["y"], label=f"{source} {label}", color=color, marker="o", alpha=alpha, s=size)
+        ax.set_title(panel_title)
+        ax.set_xlabel("x")
+        ax.set_aspect("equal", adjustable="box")
+        ax.legend(frameon=False, fontsize="small")
+    axes[0].set_ylabel("y")
     fig.tight_layout()
-    return fig, ax
+    return fig, axes
 
 
 def identity_generation_plot(
