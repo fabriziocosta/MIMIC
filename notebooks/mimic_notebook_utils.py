@@ -37,6 +37,12 @@ def class_balance(df: pd.DataFrame) -> pd.DataFrame:
     return df["label"].value_counts().rename_axis("label").to_frame("count")
 
 
+def append_generated_rows(df: pd.DataFrame, generated: pd.DataFrame) -> pd.DataFrame:
+    """Combine original rows and generated rows for balance summaries."""
+
+    return pd.concat([df.drop(columns=["id"], errors="ignore"), generated], ignore_index=True)
+
+
 def generated_embedding_trace(samples: pd.DataFrame, trace: pd.DataFrame, include_condition: bool = False) -> pd.DataFrame:
     """Join generated rows to their embedding-generation trace columns."""
 
