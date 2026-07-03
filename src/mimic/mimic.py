@@ -1,0 +1,637 @@
+"""Main MIMIC estimator."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from copy import deepcopy
+import json
+import warnings
+
+import numpy as np
+import pandas as pd
+from scipy import sparse
+from sklearn.base import BaseEstimator, TransformerMixin, clone
+from sklearn.impute import SimpleImputer
+from sklearn.metrics import pairwise_distances
+from sklearn.neighbors import NearestNeighbors
+from sklearn.preprocessing import LabelEncoder, OneHotEncoder, StandardScaler
+from sklearn.utils.validation import check_is_fitted
+
+from .decoders import MixedFeatureDecoder
+from .encoders import RandomForestPathEncoder
+from .policies import GenerationPolicy
+
+
+@dataclass
+class ContextPreprocessor:
+    numeric_columns: list[str] = field(default_factory=list)
+    categorical_columns: list[str] = field(default_factory=list)
+    include_missing_indicators: bool = True
+
+    def fit(self, X: pd.DataFrame):
+        X = pd.DataFrame(X)
+        self.numeric_columns_ = [c for c in self.numeric_columns if c in X.columns]
+        self.categorical_columns_ = [c for c in self.categorical_columns if c in X.columns]
+
+        if self.numeric_columns_:
+            self.numeric_imputer_ = SimpleImputer(strategy="median")
+            self.scaler_ = StandardScaler()
+            X_num = self.numeric_imputer_.fit_transform(X[self.numeric_columns_])
+            self.scaler_.fit(X_num)
+        else:
+            self.numeric_imputer_ = None
+            self.scaler_ = None
+
+        if self.categorical_columns_:
+            self.categorical_imputer_ = SimpleImputer(strategy="constant", fill_value="__missing__")
+            self.onehot_ = OneHotEncoder(handle_unknown="ignore", sparse_output=True)
+            X_cat = self.categorical_imputer_.fit_transform(X[self.categorical_columns_].astype("object"))
+            self.onehot_.fit(X_cat)
+        else:
+            self.categorical_imputer_ = None
+            self.onehot_ = None
+        return self
+
+    def transform(self, X: pd.DataFrame):
+        X = pd.DataFrame(X)
+        parts = []
+        if self.numeric_columns_:
+            X_num = self.numeric_imputer_.transform(X[self.numeric_columns_])
+            X_num = self.scaler_.transform(X_num)
+            parts.append(sparse.csr_matrix(X_num))
+        if self.categorical_columns_:
+            X_cat = self.categorical_imputer_.transform(X[self.categorical_columns_].astype("object"))
+            parts.append(self.onehot_.transform(X_cat).tocsr())
+        if self.include_missing_indicators and (self.numeric_columns_ or self.categorical_columns_):
+            missing = X[self.numeric_columns_ + self.categorical_columns_].isna().astype(float).to_numpy()
+            parts.append(sparse.csr_matrix(missing))
+        if not parts:
+            return sparse.csr_matrix((len(X), 0))
+        return sparse.hstack(parts, format="csr")
+
+
+@dataclass
+class BootstrapMember:
+    preprocessor: ContextPreprocessor
+    encoder: object
+    decoder: MixedFeatureDecoder
+    embedding_dim: int
+
+
+@dataclass
+class FeatureModule:
+    target_column: str
+    task: str
+    context_columns: list[str]
+    members: list[BootstrapMember]
+    observed_mask: pd.Series
+    label_encoder: LabelEncoder | None = None
+    bias: float | None = None
+    noise: float | None = None
+    classes_: np.ndarray | None = None
+
+
+class MIMIC(BaseEstimator, TransformerMixin):
+    """Modular feature-wise estimator for imputation, confidence, and generation."""
+
+    def __init__(
+        self,
+        ignore_columns=None,
+        regression_columns=None,
+        classification_columns=None,
+        encoder=None,
+        decoder=None,
+        policy=None,
+        n_bootstrap: int = 2,
+        random_state: int | None = None,
+        n_jobs: int | None = None,
+    ):
+        self.ignore_columns = ignore_columns
+        self.regression_columns = regression_columns
+        self.classification_columns = classification_columns
+        self.encoder = encoder
+        self.decoder = decoder
+        self.policy = policy
+        self.n_bootstrap = n_bootstrap
+        self.random_state = random_state
+        self.n_jobs = n_jobs
+
+    def fit(self, X, y=None):
+        X = self._as_dataframe(X).copy()
+        self._validate_schema(X)
+        rng = np.random.default_rng(self.random_state)
+        self.train_X_ = X.copy()
+        self.train_index_ = X.index.copy()
+        self.feature_modules_ = {}
+
+        for column in self.model_columns_:
+            task = self._task_for(column)
+            observed_mask = X[column].notna()
+            observed_indices = np.flatnonzero(observed_mask.to_numpy())
+            if len(observed_indices) < 2:
+                raise ValueError(f"Column {column!r} has too few observed rows")
+            if task == "classification" and X.loc[observed_mask, column].nunique() < 2:
+                raise ValueError(f"Classification column {column!r} needs at least two observed classes")
+
+            context_columns = [c for c in self.model_columns_ if c != column]
+            label_encoder = None
+            y_observed = X.loc[observed_mask, column]
+            if task == "classification":
+                label_encoder = LabelEncoder()
+                y_full = label_encoder.fit_transform(y_observed.astype(str))
+                classes = label_encoder.classes_
+            else:
+                y_full = y_observed.astype(float).to_numpy()
+                classes = None
+
+            members = []
+            oob_errors = []
+            for b in range(self.n_bootstrap):
+                sample_pos = rng.choice(np.arange(len(observed_indices)), size=len(observed_indices), replace=True)
+                sample_rows = observed_indices[sample_pos]
+                sampled_observed_positions = sample_pos
+                sampled_y = y_full[sampled_observed_positions]
+
+                X_context_sample = X.iloc[sample_rows][context_columns]
+                preprocessor = self._new_context_preprocessor(context_columns)
+                Xp = preprocessor.fit(X_context_sample).transform(X_context_sample)
+
+                encoder = self._new_encoder(task, b)
+                encoder.fit(Xp, sampled_y)
+                H = self._to_2d(encoder.transform(Xp))
+
+                decoder = self._new_decoder()
+                decoder.fit_target(column, task, H, sampled_y)
+                members.append(
+                    BootstrapMember(
+                        preprocessor=preprocessor,
+                        encoder=encoder,
+                        decoder=decoder,
+                        embedding_dim=H.shape[1],
+                    )
+                )
+
+                oob_source = np.setdiff1d(np.arange(len(observed_indices)), np.unique(sampled_observed_positions))
+                if len(oob_source):
+                    oob_rows = observed_indices[oob_source]
+                    Xp_oob = preprocessor.transform(X.iloc[oob_rows][context_columns])
+                    H_oob = self._to_2d(encoder.transform(Xp_oob), width=H.shape[1])
+                    pred = decoder.predict_target(column, H_oob)
+                    if task == "regression":
+                        err = pred.astype(float) - y_full[oob_source].astype(float)
+                        oob_errors.extend(err.tolist())
+
+            bias = float(np.mean(oob_errors)) if oob_errors else 0.0
+            noise = float(np.var(oob_errors, ddof=1)) if len(oob_errors) > 1 else 0.0
+            self.feature_modules_[column] = FeatureModule(
+                target_column=column,
+                task=task,
+                context_columns=context_columns,
+                members=members,
+                observed_mask=observed_mask,
+                label_encoder=label_encoder,
+                bias=bias,
+                noise=noise,
+                classes_=classes,
+            )
+
+        self.train_embeddings_ = self.transform(X)
+        self.embedding_slices_ = self._embedding_slices_
+        self.policy_ = self._new_policy()
+        self.policy_.validate()
+        self.neighbour_index_ = self._fit_neighbours(self.train_embeddings_)
+        return self
+
+    def transform(self, X):
+        check_is_fitted(self, "feature_modules_")
+        X = self._as_dataframe(X)
+        parts = []
+        self._embedding_slices_ = {}
+        start = 0
+        for column, module in self.feature_modules_.items():
+            embeddings = []
+            max_width = max(member.embedding_dim for member in module.members)
+            for member in module.members:
+                Xp = member.preprocessor.transform(X[module.context_columns])
+                emb = self._to_2d(member.encoder.transform(Xp), width=max_width)
+                embeddings.append(emb)
+            block = np.mean(np.stack(embeddings, axis=0), axis=0)
+            parts.append(block)
+            self._embedding_slices_[column] = slice(start, start + block.shape[1])
+            start += block.shape[1]
+        return np.hstack(parts) if parts else np.empty((len(X), 0))
+
+    def impute(self, X, columns=None, return_confidence: bool = False):
+        check_is_fitted(self, "feature_modules_")
+        X = self._as_dataframe(X).copy()
+        target_columns = self._selected_columns(columns, only_missing=True, X=X)
+        for column in target_columns:
+            pred, _details = self._predict_column(X, column)
+            mask = X[column].isna()
+            if self.feature_modules_[column].task == "regression":
+                X.loc[mask, column] = np.asarray(pred, dtype=float)[mask.to_numpy()]
+            else:
+                X.loc[mask, column] = np.asarray(pred, dtype=object)[mask.to_numpy()]
+        if return_confidence:
+            return X, self.confidence(X, columns=target_columns)
+        return X
+
+    def confidence(self, X, columns=None):
+        check_is_fitted(self, "feature_modules_")
+        X = self._as_dataframe(X)
+        rows = []
+        for column in self._selected_columns(columns, only_missing=False, X=X):
+            pred, details = self._predict_column(X, column)
+            module = self.feature_modules_[column]
+            for i, idx in enumerate(X.index):
+                observed = X.iloc[i][column] if column in X.columns else np.nan
+                base = {
+                    "row_index": idx,
+                    "column": column,
+                    "task": module.task,
+                    "prediction": pred[i],
+                    "observed": observed,
+                    "bias": module.bias if module.task == "regression" else np.nan,
+                    "variance": details.get("variance", [np.nan] * len(X))[i],
+                    "residual": self._residual(observed, pred[i], module.task),
+                    "uncertainty": details.get("uncertainty", [np.nan] * len(X))[i],
+                    "discrepancy": self._discrepancy(observed, pred[i], module.task),
+                    "entropy": details.get("entropy", [np.nan] * len(X))[i],
+                    "confidence": details.get("confidence", [np.nan] * len(X))[i],
+                    "probabilities": details.get("probabilities", [None] * len(X))[i],
+                    "predicted_probability": details.get("predicted_probability", [np.nan] * len(X))[i],
+                    "probability_variance": details.get("probability_variance", [np.nan] * len(X))[i],
+                    "probability_std": details.get("probability_std", [np.nan] * len(X))[i],
+                    "probability_min": details.get("probability_min", [np.nan] * len(X))[i],
+                    "probability_max": details.get("probability_max", [np.nan] * len(X))[i],
+                    "probability_margin": details.get("probability_margin", [np.nan] * len(X))[i],
+                    "vote_counts": details.get("vote_counts", [None] * len(X))[i],
+                    "vote_fraction": details.get("vote_fraction", [np.nan] * len(X))[i],
+                    "disagreement": details.get("disagreement", [np.nan] * len(X))[i],
+                    "top_class": details.get("top_class", [None] * len(X))[i],
+                    "second_class": details.get("second_class", [None] * len(X))[i],
+                    "noise": module.noise if module.task == "regression" else np.nan,
+                }
+                rows.append(base)
+        return pd.DataFrame(rows)
+
+    def sample(self, n_samples: int, condition=None, return_trace: bool = False):
+        check_is_fitted(self, "train_embeddings_")
+        rng = np.random.default_rng(self.random_state)
+        H = np.asarray(self.train_embeddings_)
+        synth_embeddings = []
+        traces = []
+        for sample_index in range(n_samples):
+            anchor_pos = int(rng.integers(0, len(H)))
+            neigh_pos = self._choose_neighbour(anchor_pos, rng)
+            lam = float(rng.uniform(*self.policy_.lambda_range))
+            if self.policy_.method == "smote":
+                h_new = (1.0 - lam) * H[anchor_pos] + lam * H[neigh_pos]
+                trace = {
+                    "sample_index": sample_index,
+                    "method": "smote",
+                    "anchor_index": self.train_index_[anchor_pos],
+                    "neighbour_index": self.train_index_[neigh_pos],
+                    "lambda": lam,
+                    "neighbour_mode": self.policy_.neighbour_mode,
+                    "decoder": self._decoder_name(),
+                    "random_state": self.random_state,
+                }
+            else:
+                from_pos = neigh_pos
+                to_pos = self._choose_neighbour(from_pos, rng)
+                h_new = H[anchor_pos] + lam * (H[to_pos] - H[from_pos])
+                trace = {
+                    "sample_index": sample_index,
+                    "method": "displacement",
+                    "anchor_index": self.train_index_[anchor_pos],
+                    "displacement_from_index": self.train_index_[from_pos],
+                    "displacement_to_index": self.train_index_[to_pos],
+                    "lambda": lam,
+                    "neighbour_mode": self.policy_.neighbour_mode,
+                    "restriction": "basic",
+                    "decoder": self._decoder_name(),
+                    "random_state": self.random_state,
+                }
+            synth_embeddings.append(h_new)
+            traces.append(trace)
+
+        H_new = np.vstack(synth_embeddings)
+        X_new = self._decode_embeddings(H_new)
+        if return_trace:
+            return X_new, pd.DataFrame(traces)
+        return X_new
+
+    def plot(self, X=None, color_by=None, center=None, random_state=None, ax=None):
+        check_is_fitted(self, "feature_modules_")
+        import matplotlib.pyplot as plt
+
+        X = self.train_X_ if X is None else self._as_dataframe(X)
+        original = self._plot_original_matrix(X)
+        embedding = self.transform(X)
+        orig_xy = self._classical_mds(original, center=center, random_state=random_state)
+        emb_xy = self._classical_mds(embedding, center=center, random_state=random_state)
+
+        if ax is None:
+            fig, axes = plt.subplots(1, 2, figsize=(11, 4))
+        else:
+            axes = np.asarray(ax).ravel()
+            fig = axes[0].figure
+            if len(axes) < 2:
+                raise ValueError("ax must contain two axes")
+
+        colors, is_numeric = self._plot_colors(X, color_by)
+        for axis, xy, title in zip(axes[:2], [orig_xy, emb_xy], ["Original data MDS", "MIMIC embedding MDS"]):
+            if colors is None:
+                axis.scatter(xy[:, 0], xy[:, 1], s=24)
+            elif is_numeric:
+                sc = axis.scatter(xy[:, 0], xy[:, 1], c=colors, s=24, cmap="viridis")
+                fig.colorbar(sc, ax=axis)
+            else:
+                codes, uniques = pd.factorize(colors.fillna("__missing__"))
+                sc = axis.scatter(xy[:, 0], xy[:, 1], c=codes, s=24, cmap="tab10")
+                axis.legend(
+                    handles=sc.legend_elements()[0],
+                    labels=[str(u) for u in uniques],
+                    loc="best",
+                    fontsize="small",
+                )
+            axis.set_title(title)
+            axis.set_xlabel("MDS 1")
+            axis.set_ylabel("MDS 2")
+        fig.tight_layout()
+        return fig, axes[:2]
+
+    def _predict_column(self, X: pd.DataFrame, column: str):
+        module = self.feature_modules_[column]
+        if module.task == "regression":
+            preds = []
+            max_width = max(member.embedding_dim for member in module.members)
+            for member in module.members:
+                H = self._member_embedding(member, module, X, max_width=member.embedding_dim)
+                preds.append(member.decoder.predict_target(column, H).astype(float))
+            arr = np.vstack(preds)
+            mean = arr.mean(axis=0)
+            variance = arr.var(axis=0, ddof=1) if arr.shape[0] > 1 else np.zeros(arr.shape[1])
+            details = {
+                "variance": variance,
+                "uncertainty": variance + (module.noise or 0.0),
+            }
+            return mean, details
+
+        probas = []
+        votes = []
+        for member in module.members:
+            H = self._member_embedding(member, module, X, max_width=member.embedding_dim)
+            p = member.decoder.predict_proba_target(column, H)
+            probas.append(p)
+            votes.append(np.argmax(p, axis=1))
+        p_arr = np.stack(probas, axis=0)
+        p_mean = p_arr.mean(axis=0)
+        pred_codes = np.argmax(p_mean, axis=1)
+        pred_labels = module.label_encoder.inverse_transform(pred_codes)
+        pred_probs = p_mean[np.arange(len(X)), pred_codes]
+        sorted_probs = np.sort(p_mean, axis=1)
+        margin = sorted_probs[:, -1] - (sorted_probs[:, -2] if p_mean.shape[1] > 1 else 0.0)
+        vote_arr = np.vstack(votes)
+        vote_fraction = np.mean(vote_arr == pred_codes[None, :], axis=0)
+        eps = 1e-12
+        entropy = -np.sum(p_mean * np.log(p_mean + eps), axis=1)
+
+        probabilities = []
+        vote_counts = []
+        second_class = []
+        for i in range(len(X)):
+            probabilities.append({str(cls): float(p_mean[i, k]) for k, cls in enumerate(module.classes_)})
+            counts = np.bincount(vote_arr[:, i], minlength=len(module.classes_))
+            vote_counts.append({str(module.classes_[k]): int(counts[k]) for k in range(len(module.classes_))})
+            order = np.argsort(p_mean[i])
+            second_class.append(module.classes_[order[-2]] if len(order) > 1 else None)
+
+        class_probs = p_arr[:, np.arange(len(X)), pred_codes]
+        prob_var = class_probs.var(axis=0, ddof=1) if p_arr.shape[0] > 1 else np.zeros(len(X))
+        details = {
+            "variance": prob_var,
+            "uncertainty": entropy,
+            "entropy": entropy,
+            "confidence": pred_probs,
+            "probabilities": probabilities,
+            "predicted_probability": pred_probs,
+            "probability_variance": prob_var,
+            "probability_std": np.sqrt(prob_var),
+            "probability_min": class_probs.min(axis=0),
+            "probability_max": class_probs.max(axis=0),
+            "probability_margin": margin,
+            "vote_counts": vote_counts,
+            "vote_fraction": vote_fraction,
+            "disagreement": 1.0 - vote_fraction,
+            "top_class": pred_labels,
+            "second_class": second_class,
+        }
+        return pred_labels, details
+
+    def _member_embedding(self, member: BootstrapMember, module: FeatureModule, X: pd.DataFrame, max_width: int | None = None):
+        Xp = member.preprocessor.transform(X[module.context_columns])
+        return self._to_2d(member.encoder.transform(Xp), width=max_width)
+
+    def _decode_embeddings(self, H):
+        data = {}
+        for column, module in self.feature_modules_.items():
+            sl = self.embedding_slices_[column]
+            block = H[:, sl]
+            if module.task == "regression":
+                preds = []
+                for member in module.members:
+                    b = self._to_2d(block, width=member.embedding_dim)[:, : member.embedding_dim]
+                    preds.append(member.decoder.predict_target(column, b).astype(float))
+                data[column] = np.vstack(preds).mean(axis=0)
+            else:
+                probas = []
+                for member in module.members:
+                    b = self._to_2d(block, width=member.embedding_dim)[:, : member.embedding_dim]
+                    probas.append(member.decoder.predict_proba_target(column, b))
+                pred_codes = np.argmax(np.stack(probas, axis=0).mean(axis=0), axis=1)
+                data[column] = module.label_encoder.inverse_transform(pred_codes)
+        return pd.DataFrame(data)
+
+    def _validate_schema(self, X: pd.DataFrame):
+        self.columns_ = list(X.columns)
+        self.ignore_columns_ = list(self.ignore_columns or [])
+        missing_ignored = set(self.ignore_columns_) - set(X.columns)
+        if missing_ignored:
+            raise ValueError(f"Unknown ignore_columns: {sorted(missing_ignored)}")
+
+        if self.regression_columns is None and self.classification_columns is None:
+            model_cols = [c for c in X.columns if c not in self.ignore_columns_]
+            self.regression_columns_ = [c for c in model_cols if pd.api.types.is_numeric_dtype(X[c])]
+            self.classification_columns_ = [c for c in model_cols if c not in self.regression_columns_]
+        else:
+            self.regression_columns_ = list(self.regression_columns or [])
+            self.classification_columns_ = list(self.classification_columns or [])
+
+        declared = set(self.ignore_columns_) | set(self.regression_columns_) | set(self.classification_columns_)
+        missing = declared - set(X.columns)
+        if missing:
+            raise ValueError(f"Declared columns not present in X: {sorted(missing)}")
+        overlap = (set(self.ignore_columns_) & set(self.regression_columns_)) | (
+            set(self.ignore_columns_) & set(self.classification_columns_)
+        ) | (set(self.regression_columns_) & set(self.classification_columns_))
+        if overlap:
+            raise ValueError(f"Columns cannot appear in multiple roles: {sorted(overlap)}")
+        self.model_columns_ = self.regression_columns_ + self.classification_columns_
+        unassigned = set(X.columns) - declared
+        if unassigned:
+            raise ValueError(f"Every non-ignored column needs a task: {sorted(unassigned)}")
+        if not self.model_columns_:
+            raise ValueError("At least one modelled column is required")
+
+    def _new_context_preprocessor(self, context_columns):
+        numeric = [c for c in context_columns if c in self.regression_columns_]
+        categorical = [c for c in context_columns if c in self.classification_columns_]
+        return ContextPreprocessor(numeric_columns=numeric, categorical_columns=categorical)
+
+    def _new_encoder(self, task: str, bootstrap_index: int):
+        encoder = self.encoder if self.encoder is not None else RandomForestPathEncoder(n_estimators=50, n_jobs=self.n_jobs)
+        encoder = clone(encoder)
+        params = encoder.get_params()
+        updates = {}
+        if "task" in params:
+            updates["task"] = task
+        if "random_state" in params and self.random_state is not None:
+            updates["random_state"] = int(self.random_state + bootstrap_index)
+        if "n_jobs" in params and self.n_jobs is not None:
+            updates["n_jobs"] = self.n_jobs
+        if updates:
+            encoder.set_params(**updates)
+        return encoder
+
+    def _new_decoder(self):
+        if self.decoder is None:
+            return MixedFeatureDecoder.random_forest(n_estimators=50, random_state=self.random_state, n_jobs=self.n_jobs)
+        return clone(self.decoder)
+
+    def _new_policy(self):
+        if self.policy is None:
+            return GenerationPolicy()
+        return deepcopy(self.policy)
+
+    def _task_for(self, column: str):
+        if column in self.regression_columns_:
+            return "regression"
+        if column in self.classification_columns_:
+            return "classification"
+        raise KeyError(column)
+
+    def _selected_columns(self, columns, only_missing: bool, X: pd.DataFrame):
+        if columns is None:
+            cols = [c for c in self.model_columns_ if (not only_missing or X[c].isna().any())]
+        else:
+            cols = list(columns)
+        unknown = set(cols) - set(self.model_columns_)
+        if unknown:
+            raise ValueError(f"Unknown modelled columns: {sorted(unknown)}")
+        return cols
+
+    def _fit_neighbours(self, H):
+        n = len(H)
+        k = min(max(2, self.policy_.n_neighbors + 1), n)
+        model = NearestNeighbors(n_neighbors=k)
+        model.fit(H)
+        return model
+
+    def _choose_neighbour(self, pos: int, rng):
+        distances, indices = self.neighbour_index_.kneighbors(self.train_embeddings_[[pos]], return_distance=True)
+        candidates = [int(i) for i in indices[0] if int(i) != pos]
+        if self.policy_.neighbour_mode == "mutual":
+            mutual = []
+            for c in candidates:
+                _d, rev = self.neighbour_index_.kneighbors(self.train_embeddings_[[c]], return_distance=True)
+                if pos in [int(i) for i in rev[0]]:
+                    mutual.append(c)
+            candidates = mutual or candidates
+        if not candidates:
+            return pos
+        return int(rng.choice(candidates))
+
+    def _plot_original_matrix(self, X):
+        cols = [c for c in self.model_columns_ if c in X.columns]
+        prep = ContextPreprocessor(
+            numeric_columns=[c for c in cols if c in self.regression_columns_],
+            categorical_columns=[c for c in cols if c in self.classification_columns_],
+        )
+        return prep.fit(X[cols]).transform(X[cols]).toarray()
+
+    def _classical_mds(self, X, center=None, random_state=None):
+        X = np.asarray(X, dtype=float)
+        if len(X) == 0:
+            return np.empty((0, 2))
+        c = self._resolve_center(X, center, random_state)
+        Xc = X - c
+        D2 = pairwise_distances(Xc, metric="euclidean", squared=True)
+        n = D2.shape[0]
+        J = np.eye(n) - np.ones((n, n)) / n
+        B = -0.5 * J @ D2 @ J
+        vals, vecs = np.linalg.eigh(B)
+        order = np.argsort(vals)[::-1][:2]
+        vals = np.maximum(vals[order], 0)
+        coords = vecs[:, order] * np.sqrt(vals)
+        if coords.shape[1] < 2:
+            coords = np.pad(coords, ((0, 0), (0, 2 - coords.shape[1])))
+        return coords
+
+    def _resolve_center(self, X, center, random_state):
+        if center is None:
+            return np.nanmean(X, axis=0)
+        if isinstance(center, str) and center == "random":
+            rng = np.random.default_rng(self.random_state if random_state is None else random_state)
+            return X[int(rng.integers(0, len(X)))]
+        if isinstance(center, (int, np.integer)):
+            return X[int(center)]
+        arr = np.asarray(center, dtype=float)
+        if arr.shape[0] != X.shape[1]:
+            warnings.warn("Explicit center dimensionality does not match; falling back to mean", RuntimeWarning)
+            return np.nanmean(X, axis=0)
+        return arr
+
+    def _plot_colors(self, X, color_by):
+        if color_by is None:
+            return None, False
+        if color_by not in X.columns:
+            raise ValueError(f"color_by column {color_by!r} is not in X")
+        series = X[color_by]
+        return series, pd.api.types.is_numeric_dtype(series)
+
+    def _as_dataframe(self, X):
+        if isinstance(X, pd.DataFrame):
+            return X
+        return pd.DataFrame(X)
+
+    def _to_2d(self, X, width: int | None = None):
+        arr = X.toarray() if sparse.issparse(X) else np.asarray(X)
+        if arr.ndim == 1:
+            arr = arr.reshape(-1, 1)
+        if width is not None:
+            if arr.shape[1] < width:
+                arr = np.pad(arr, ((0, 0), (0, width - arr.shape[1])))
+            elif arr.shape[1] > width:
+                arr = arr[:, :width]
+        return arr
+
+    def _residual(self, observed, prediction, task):
+        if pd.isna(observed):
+            return np.nan
+        if task == "regression":
+            return float(observed) - float(prediction)
+        return np.nan
+
+    def _discrepancy(self, observed, prediction, task):
+        if pd.isna(observed):
+            return np.nan
+        if task == "regression":
+            return abs(float(observed) - float(prediction))
+        return float(observed != prediction)
+
+    def _decoder_name(self):
+        if self.decoder is None:
+            return "MixedFeatureDecoder.random_forest"
+        return self.decoder.__class__.__name__
