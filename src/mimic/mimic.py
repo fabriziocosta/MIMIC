@@ -231,6 +231,7 @@ class MIMIC(BaseEstimator, TransformerMixin):
             if self.feature_modules_[column].task == "regression":
                 X.loc[mask, column] = np.asarray(pred, dtype=float)[mask.to_numpy()]
             else:
+                X[column] = X[column].astype(object)
                 X.loc[mask, column] = np.asarray(pred, dtype=object)[mask.to_numpy()]
         if return_confidence:
             return X, self.confidence(X, columns=target_columns)
