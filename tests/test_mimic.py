@@ -159,6 +159,26 @@ def test_regression_targets_are_decoded_on_original_scale():
     assert generated["y"].between(df["y"].min() - 100, df["y"].max() + 100).all()
 
 
+def test_sample_condition_restricts_anchor_rows():
+    df = make_frame(n=50)
+    model = MIMIC(
+        ignore_columns=["id"],
+        regression_columns=["age", "income"],
+        classification_columns=["segment", "outcome"],
+        encoder=RandomForestPathEncoder(n_estimators=5, embedding_dim=4, random_state=5),
+        decoder=MixedFeatureDecoder.random_forest(n_estimators=5, random_state=5),
+        policy=GenerationPolicy(method="displacement", n_neighbors=3),
+        n_bootstrap=1,
+        random_state=5,
+    ).fit(df)
+
+    samples, trace = model.sample(10, condition={"segment": "older"}, return_trace=True)
+    anchor_segments = df.loc[trace["anchor_index"], "segment"].to_numpy()
+    assert set(anchor_segments) == {"older"}
+    assert samples["segment"].eq("older").all()
+    assert trace["condition"].eq('{"segment": "older"}').all()
+
+
 def test_classification_probability_alignment_when_bootstrap_misses_class():
     df = make_frame(n=60)
     df["rare"] = "common"

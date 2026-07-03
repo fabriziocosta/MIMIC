@@ -286,11 +286,15 @@ class MIMIC(BaseEstimator, TransformerMixin):
         check_is_fitted(self, "train_embeddings_")
         rng = np.random.default_rng(self.random_state)
         H = np.asarray(self.train_embeddings_)
+        condition_mask = self._condition_mask(condition)
+        anchor_candidates = np.flatnonzero(condition_mask)
+        if len(anchor_candidates) == 0:
+            raise ValueError("No training rows satisfy the requested generation condition")
         synth_embeddings = []
         traces = []
         for sample_index in range(n_samples):
-            anchor_pos = int(rng.integers(0, len(H)))
-            neigh_pos = self._choose_neighbour(anchor_pos, rng)
+            anchor_pos = int(rng.choice(anchor_candidates))
+            neigh_pos = self._choose_neighbour(anchor_pos, rng, condition_mask=condition_mask)
             lam = float(rng.uniform(*self.policy_.lambda_range))
             if self.policy_.method == "smote":
                 h_new = (1.0 - lam) * H[anchor_pos] + lam * H[neigh_pos]
@@ -301,12 +305,13 @@ class MIMIC(BaseEstimator, TransformerMixin):
                     "neighbour_index": self.train_index_[neigh_pos],
                     "lambda": lam,
                     "neighbour_mode": self.policy_.neighbour_mode,
+                    "condition": json.dumps(condition, sort_keys=True) if condition is not None else None,
                     "decoder": self._decoder_name(),
                     "random_state": self.random_state,
                 }
             else:
                 from_pos = neigh_pos
-                to_pos = self._choose_neighbour(from_pos, rng)
+                to_pos = self._choose_neighbour(from_pos, rng, condition_mask=condition_mask)
                 h_new = H[anchor_pos] + lam * (H[to_pos] - H[from_pos])
                 trace = {
                     "sample_index": sample_index,
@@ -317,6 +322,7 @@ class MIMIC(BaseEstimator, TransformerMixin):
                     "lambda": lam,
                     "neighbour_mode": self.policy_.neighbour_mode,
                     "restriction": "basic",
+                    "condition": json.dumps(condition, sort_keys=True) if condition is not None else None,
                     "decoder": self._decoder_name(),
                     "random_state": self.random_state,
                 }
@@ -325,6 +331,10 @@ class MIMIC(BaseEstimator, TransformerMixin):
 
         H_new = np.vstack(synth_embeddings)
         X_new = self._decode_embeddings(H_new)
+        if condition is not None:
+            for column, value in condition.items():
+                if column in X_new.columns:
+                    X_new[column] = value
         if return_trace:
             return X_new, pd.DataFrame(traces)
         return X_new
@@ -571,9 +581,24 @@ class MIMIC(BaseEstimator, TransformerMixin):
         model.fit(H)
         return model
 
-    def _choose_neighbour(self, pos: int, rng):
+    def _condition_mask(self, condition):
+        if condition is None:
+            return np.ones(len(self.train_X_), dtype=bool)
+        if not isinstance(condition, dict):
+            raise ValueError("condition must be a mapping of column names to required values")
+        mask = np.ones(len(self.train_X_), dtype=bool)
+        for column, value in condition.items():
+            if column not in self.train_X_.columns:
+                raise ValueError(f"Unknown condition column: {column!r}")
+            mask &= self.train_X_[column].astype(object).eq(value).to_numpy()
+        return mask
+
+    def _choose_neighbour(self, pos: int, rng, condition_mask=None):
         distances, indices = self.neighbour_index_.kneighbors(self.train_embeddings_[[pos]], return_distance=True)
         candidates = [int(i) for i in indices[0] if int(i) != pos]
+        if condition_mask is not None:
+            conditioned = [c for c in candidates if condition_mask[c]]
+            candidates = conditioned or candidates
         if self.policy_.neighbour_mode == "mutual":
             mutual = []
             for c in candidates:
