@@ -185,5 +185,5 @@ def test_resnet_encoder_smoke():
         batch_size=8,
         random_state=0,
     )
-    Z = enc.fit(X, y).transform(X)
+    Z = enc.fit(sparse.csr_matrix(X), y).transform(sparse.csr_matrix(X))
     assert Z.shape == (24, 4)

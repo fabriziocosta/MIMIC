@@ -204,7 +204,7 @@ class ResNetEncoder(BaseEstimator, TransformerMixin):
         if self.task not in {"regression", "classification"}:
             raise ValueError("task must be 'regression' or 'classification'")
 
-        X_arr = np.asarray(X, dtype=np.float32)
+        X_arr = self._as_float32_array(X)
         rng = np.random.default_rng(self.random_state)
         if self.random_state is not None:
             torch.manual_seed(int(self.random_state))
@@ -282,7 +282,7 @@ class ResNetEncoder(BaseEstimator, TransformerMixin):
 
     def transform(self, X):
         check_is_fitted(self, "model_")
-        X_arr = np.asarray(X, dtype=np.float32)
+        X_arr = self._as_float32_array(X)
         self.model_.eval()
         with torch.no_grad():
             Xt = torch.as_tensor(X_arr, dtype=torch.float32, device=self.device_)
@@ -301,3 +301,8 @@ class ResNetEncoder(BaseEstimator, TransformerMixin):
         if self.device == "auto":
             return torch.device("cuda" if torch.cuda.is_available() else "cpu")
         return torch.device(self.device)
+
+    def _as_float32_array(self, X):
+        if sparse.issparse(X):
+            return X.toarray().astype(np.float32, copy=False)
+        return np.asarray(X, dtype=np.float32)
