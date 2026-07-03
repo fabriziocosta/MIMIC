@@ -226,6 +226,33 @@ def test_identity_encoder_decoder_generation_uses_full_row_context():
     assert trace["method"].eq("smote").all()
 
 
+def test_sample_restores_original_model_column_order_and_integer_dtype():
+    rng = np.random.default_rng(9)
+    df = pd.DataFrame(
+        {
+            "id": np.arange(70),
+            "label": np.where(np.arange(70) % 2 == 0, "a", "b"),
+            "count": rng.integers(0, 20, size=70),
+            "score": rng.normal(size=70),
+        }
+    )
+    model = MIMIC(
+        ignore_columns=["id"],
+        regression_columns=["count", "score"],
+        classification_columns=["label"],
+        encoder=IdentityEncoder(),
+        decoder=IdentityDecoder(),
+        policy=GenerationPolicy(method="smote", n_neighbors=4),
+        n_bootstrap=1,
+        random_state=9,
+    ).fit(df)
+
+    samples = model.sample(6)
+    assert list(samples.columns) == ["label", "count", "score"]
+    assert pd.api.types.is_integer_dtype(samples["count"].dtype)
+    assert pd.api.types.is_float_dtype(samples["score"].dtype)
+
+
 def test_sample_condition_restricts_anchor_rows():
     df = make_frame(n=50)
     model = MIMIC(

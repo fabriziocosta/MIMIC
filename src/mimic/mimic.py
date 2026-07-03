@@ -123,6 +123,7 @@ class MIMIC(BaseEstimator, TransformerMixin):
         rng = np.random.default_rng(self.random_state)
         self.train_X_ = X.copy()
         self.train_index_ = X.index.copy()
+        self.input_dtypes_ = X.dtypes.to_dict()
         self.feature_modules_ = {}
 
         for column in self.model_columns_:
@@ -348,6 +349,7 @@ class MIMIC(BaseEstimator, TransformerMixin):
                 return_trace=return_trace,
             )
             traces.extend(cell_traces)
+        X_new = self._restore_sample_schema(X_new)
         if return_trace:
             return X_new, pd.DataFrame(traces)
         return X_new
@@ -622,7 +624,8 @@ class MIMIC(BaseEstimator, TransformerMixin):
         ) | (set(self.regression_columns_) & set(self.classification_columns_))
         if overlap:
             raise ValueError(f"Columns cannot appear in multiple roles: {sorted(overlap)}")
-        self.model_columns_ = self.regression_columns_ + self.classification_columns_
+        task_columns = set(self.regression_columns_) | set(self.classification_columns_)
+        self.model_columns_ = [c for c in X.columns if c in task_columns]
         unassigned = set(X.columns) - declared
         if unassigned:
             raise ValueError(f"Every non-ignored column needs a task: {sorted(unassigned)}")
@@ -638,6 +641,25 @@ class MIMIC(BaseEstimator, TransformerMixin):
         if getattr(self.encoder, "include_target_context", False):
             return list(self.model_columns_)
         return [c for c in self.model_columns_ if c != column]
+
+    def _restore_sample_schema(self, X: pd.DataFrame):
+        X = X.copy()
+        ordered = [c for c in self.model_columns_ if c in X.columns]
+        X = X[ordered]
+        for column in ordered:
+            dtype = self.input_dtypes_.get(column)
+            if dtype is None:
+                continue
+            if column in self.regression_columns_ and pd.api.types.is_integer_dtype(dtype):
+                X[column] = np.rint(pd.to_numeric(X[column], errors="coerce")).astype(dtype)
+            elif column in self.regression_columns_ and pd.api.types.is_bool_dtype(dtype):
+                X[column] = X[column].astype(bool).astype(dtype)
+            elif column in self.classification_columns_:
+                try:
+                    X[column] = X[column].astype(dtype)
+                except (TypeError, ValueError):
+                    pass
+        return X
 
     def _new_encoder(self, task: str, bootstrap_index: int):
         encoder = self.encoder if self.encoder is not None else RandomForestPathEncoder(n_estimators=50, n_jobs=self.n_jobs)

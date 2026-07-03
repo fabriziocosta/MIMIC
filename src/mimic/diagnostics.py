@@ -68,6 +68,7 @@ def pairwise_feature_plot(
     random_state=None,
 ):
     """Plot triangular pairwise feature statistics for original and generated rows."""
+    import matplotlib.pyplot as plt
     import seaborn as sns
 
     original_plot = original[features].copy()
@@ -86,22 +87,48 @@ def pairwise_feature_plot(
     generated_plot["source"] = generated_label
     plot_data = pd.concat([original_plot, generated_plot], ignore_index=True)
 
-    return sns.pairplot(
+    palette = dict(zip([original_label, generated_label], sns.color_palette(n_colors=2)))
+    grid = sns.PairGrid(
         plot_data,
         vars=features,
         hue="source",
         corner=True,
-        diag_kind="hist",
         height=2.2,
-        plot_kws={"alpha": 0.45, "s": 18, "edgecolor": "none"},
-        diag_kws={
-            "alpha": 0.75,
-            "common_norm": False,
-            "element": "step",
-            "fill": False,
-            "log_scale": (False, True),
-        },
+        palette=palette,
     )
+    grid.map_lower(plt.scatter, alpha=0.45, s=18, edgecolor="none")
+    _map_log1p_filled_histograms(grid, plot_data, features, [original_label, generated_label], palette)
+    grid.add_legend()
+    return grid
+
+
+def _map_log1p_filled_histograms(grid, plot_data, features, labels, palette):
+    for i, feature in enumerate(features):
+        ax = grid.axes[i, i]
+        if ax is None:
+            continue
+        values = pd.to_numeric(plot_data[feature], errors="coerce").dropna()
+        if values.empty:
+            continue
+        bins = np.histogram_bin_edges(values.to_numpy(), bins="auto")
+        if len(bins) < 2:
+            center = float(values.iloc[0])
+            bins = np.array([center - 0.5, center + 0.5])
+        for label in labels:
+            series = pd.to_numeric(plot_data.loc[plot_data["source"] == label, feature], errors="coerce").dropna()
+            counts, edges = np.histogram(series.to_numpy(), bins=bins)
+            ax.bar(
+                edges[:-1],
+                np.log1p(counts),
+                width=np.diff(edges),
+                align="edge",
+                alpha=0.45,
+                color=palette[label],
+                edgecolor=palette[label],
+                linewidth=0.6,
+                label=label,
+            )
+        ax.set_ylabel("log1p(count)")
 
 
 def binary_classification_diagnostics(
