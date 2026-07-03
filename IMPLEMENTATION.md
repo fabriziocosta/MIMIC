@@ -82,9 +82,10 @@ The initial decoder helper constructors should be:
 
 * `LinearMixedFeatureDecoder()` or `MixedFeatureDecoder.linear()`: linear regression for regression targets and logistic regression for classification targets;
 * `MixedFeatureDecoder.random_forest()`: random forest regressor and random forest classifier;
+* `ForestConditionalSampler()`: random-forest prediction plus stochastic conditional sampling for generation;
 * `MixedFeatureDecoder(regression_estimator=..., classification_estimator=...)`: custom scikit estimators supplied by the user.
 
-The important requirement is that the combined decoder owns the type dispatch. MIMIC should ask the decoder to fit or predict a named target column with a declared task, rather than choosing a decoder alias internally.
+The important requirement is that the combined decoder owns the type dispatch. MIMIC should ask the decoder to fit, predict, or sample a named target column with a declared task, rather than choosing a decoder alias internally.
 
 The initial encoder implementations should be:
 
@@ -364,7 +365,8 @@ The method should:
 2. select neighbours according to the configured policy;
 3. generate synthetic embeddings;
 4. decode embeddings back into feature values;
-5. optionally return a trace record for each synthetic row.
+5. if the decoder supports stochastic sampling, run Gibbs-style conditional sampling over decoded rows;
+6. optionally return trace records for embedding generation and per-cell sampling.
 
 ### 8.1 Generation policy
 
@@ -450,6 +452,55 @@ For displacement:
 ```
 
 Trace records are required for auditability. They do not by themselves guarantee privacy. Privacy checks should be a separate validation layer.
+
+### 8.3 Forest conditional sampling
+
+`ForestConditionalSampler` is an opt-in decoder for stochastic generation. It keeps the ordinary deterministic decoder interface, but also fits feature-wise conditional samplers.
+
+For each target feature `j`, the sampler conditions on:
+
+$$
+z_{-j}
+$$
+
+which is the concatenated MIMIC embedding with the target feature block removed. This avoids conditioning a feature sampler on its own direct embedding block.
+
+For categorical targets, the sampler uses a random-forest classifier:
+
+$$
+x_j^\star \sim \operatorname{Categorical}(\hat p_j(\cdot \mid z_{-j}))
+$$
+
+For continuous targets, the sampler uses a random-forest regressor as an adaptive neighbourhood model. If a query context reaches leaf `L_t(z_{-j})` in tree `t`, each training row sharing that leaf receives weight:
+
+$$
+w_{ij}(z_{-j})
+=
+\frac{1}{T}
+\sum_{t=1}^{T}
+\frac{\mathbf{1}\{z_{-j}^{(i)} \in L_t(z_{-j})\}}{|L_t(z_{-j})|}
+$$
+
+The sampled value is an exact observed training target:
+
+$$
+x_j^\star = x_j^{(i)}
+$$
+
+with probability:
+
+$$
+w_{ij}(z_{-j})
+$$
+
+Generation with this decoder proceeds in two stages:
+
+1. create an initial synthetic embedding with SMOTE or displacement and decode it deterministically;
+2. run three Gibbs refinement sweeps, sampling every non-conditioned feature from its `z_{-j}` forest conditional sampler.
+
+If `condition={"label": "minority"}` is passed, matching training rows are used as anchors, neighbours are preferentially condition-matching, and conditioned output columns remain fixed during Gibbs sweeps.
+
+When `return_trace=True`, the trace contains both `trace_type="embedding"` rows and `trace_type="cell"` rows. Cell trace rows include the sweep, target column, sampled value, conditioning type, target embedding slice, source row and weight for continuous features, or class probabilities for categorical features.
 
 ## 9. Plotting
 
@@ -617,6 +668,12 @@ MixedFeatureDecoder(
     regression_estimator=None,
     classification_estimator=None,
 )
+ForestConditionalSampler(
+    n_estimators=100,
+    random_state=None,
+    n_jobs=None,
+    min_samples_leaf=1,
+)
 ```
 
 and convenience constructors:
@@ -625,6 +682,7 @@ and convenience constructors:
 LinearMixedFeatureDecoder()
 MixedFeatureDecoder.linear()
 MixedFeatureDecoder.random_forest()
+ForestConditionalSampler()
 ```
 
 Internally, the combined decoder should clone the appropriate base estimator for each fitted target column:
@@ -641,9 +699,14 @@ decoder.fit_target(column, task, H, y)
 decoder.predict_target(column, H)
 decoder.predict_proba_target(column, H)  # classification only
 decoder.decode(H, columns=None)
+decoder.can_sample_target(column)
+decoder.fit_sampler_target(column, task, H_context, y, train_indices=None)
+decoder.sample_target(column, task, H_context, rng, return_trace=False)
 ```
 
 `fit_target` trains one target-specific model from embeddings to one feature. `decode` applies all fitted target models and returns a dataframe with one decoded column per target.
+
+The stochastic sampler methods are optional. Deterministic decoders should return `False` from `can_sample_target`. `ForestConditionalSampler` should fit sampler targets on `z_{-j}` contexts after the full training embedding is available.
 
 Regression target models must implement:
 
