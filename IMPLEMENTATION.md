@@ -80,7 +80,7 @@ MIMIC(
 
 The initial decoder helper constructors should be:
 
-* `MixedFeatureDecoder.linear()`: linear regression for regression targets and logistic regression for classification targets;
+* `LinearMixedFeatureDecoder()` or `MixedFeatureDecoder.linear()`: linear regression for regression targets and logistic regression for classification targets;
 * `MixedFeatureDecoder.random_forest()`: random forest regressor and random forest classifier;
 * `MixedFeatureDecoder(regression_estimator=..., classification_estimator=...)`: custom scikit estimators supplied by the user.
 
@@ -622,6 +622,7 @@ MixedFeatureDecoder(
 and convenience constructors:
 
 ```python
+LinearMixedFeatureDecoder()
 MixedFeatureDecoder.linear()
 MixedFeatureDecoder.random_forest()
 ```

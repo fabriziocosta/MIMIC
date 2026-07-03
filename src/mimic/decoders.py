@@ -19,10 +19,7 @@ class MixedFeatureDecoder(BaseEstimator):
 
     @classmethod
     def linear(cls):
-        return cls(
-            regression_estimator=LinearRegression(),
-            classification_estimator=LogisticRegression(max_iter=1000),
-        )
+        return LinearMixedFeatureDecoder()
 
     @classmethod
     def random_forest(cls, n_estimators: int = 100, random_state: int | None = None, n_jobs: int | None = None):
@@ -90,3 +87,53 @@ def mean_regression_prediction(predictions):
     arr = np.asarray(predictions, dtype=float)
     return np.nanmean(arr, axis=0)
 
+
+class LinearMixedFeatureDecoder(MixedFeatureDecoder):
+    """Mixed decoder backed by scikit-learn linear models.
+
+    Regression targets use ``LinearRegression``. Classification targets use
+    ``LogisticRegression`` so that ``predict_proba`` is available for MIMIC's
+    confidence diagnostics.
+    """
+
+    def __init__(
+        self,
+        fit_intercept: bool = True,
+        positive: bool = False,
+        logistic_C: float = 1.0,
+        logistic_penalty: str = "l2",
+        logistic_solver: str = "lbfgs",
+        logistic_max_iter: int = 1000,
+        logistic_class_weight=None,
+        random_state: int | None = None,
+        n_jobs: int | None = None,
+    ):
+        self.fit_intercept = fit_intercept
+        self.positive = positive
+        self.logistic_C = logistic_C
+        self.logistic_penalty = logistic_penalty
+        self.logistic_solver = logistic_solver
+        self.logistic_max_iter = logistic_max_iter
+        self.logistic_class_weight = logistic_class_weight
+        self.random_state = random_state
+        self.n_jobs = n_jobs
+        super().__init__(regression_estimator=None, classification_estimator=None)
+
+    def _estimator_for_task(self, task: str):
+        if task == "regression":
+            return LinearRegression(
+                fit_intercept=self.fit_intercept,
+                positive=self.positive,
+                n_jobs=self.n_jobs,
+            )
+        if task == "classification":
+            return LogisticRegression(
+                C=self.logistic_C,
+                penalty=self.logistic_penalty,
+                solver=self.logistic_solver,
+                max_iter=self.logistic_max_iter,
+                class_weight=self.logistic_class_weight,
+                random_state=self.random_state,
+                n_jobs=self.n_jobs,
+            )
+        raise ValueError("task must be 'regression' or 'classification'")

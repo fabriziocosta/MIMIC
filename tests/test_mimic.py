@@ -8,6 +8,7 @@ from scipy import sparse
 
 from mimic import (
     GenerationPolicy,
+    LinearMixedFeatureDecoder,
     MIMIC,
     MixedFeatureDecoder,
     RandomForestPathEncoder,
@@ -62,6 +63,21 @@ def test_mixed_feature_decoder_regression_and_classification():
     assert decoder.predict_proba_target("y", H).shape[0] == 30
 
 
+def test_linear_mixed_feature_decoder_regression_and_classification():
+    rng = np.random.default_rng(0)
+    H = rng.normal(size=(40, 5))
+    y_reg = H[:, 0] - 2 * H[:, 1]
+    y_cls = np.where(H[:, 2] > 0, "high", "low")
+    decoder = LinearMixedFeatureDecoder(logistic_max_iter=500)
+    decoder.fit_target("x", "regression", H, y_reg)
+    decoder.fit_target("y", "classification", H, y_cls)
+
+    assert decoder.predict_target("x", H).shape == (40,)
+    assert set(decoder.predict_target("y", H)).issubset({"high", "low"})
+    assert decoder.predict_proba_target("y", H).shape == (40, 2)
+    assert isinstance(MixedFeatureDecoder.linear(), LinearMixedFeatureDecoder)
+
+
 def test_mimic_fit_transform_impute_confidence_sample_plot():
     df = make_frame()
     df_missing = df.copy()
@@ -101,6 +117,24 @@ def test_mimic_fit_transform_impute_confidence_sample_plot():
     fig.canvas.draw()
 
 
+def test_mimic_with_linear_mixed_feature_decoder():
+    df = make_frame(n=50)
+    df.loc[[0, 1], "age"] = np.nan
+    df.loc[[2, 3], "outcome"] = np.nan
+    model = MIMIC(
+        ignore_columns=["id"],
+        regression_columns=["age", "income"],
+        classification_columns=["segment", "outcome"],
+        encoder=RandomForestPathEncoder(n_estimators=5, embedding_dim=4, random_state=2),
+        decoder=LinearMixedFeatureDecoder(logistic_max_iter=500),
+        n_bootstrap=1,
+        random_state=2,
+    ).fit(df)
+
+    imputed = model.impute(df)
+    assert not imputed[["age", "outcome"]].isna().any().any()
+
+
 def test_missing_target_excluded_but_missing_context_allowed():
     df = make_frame(n=40)
     df.loc[0, "age"] = np.nan
@@ -134,4 +168,3 @@ def test_resnet_encoder_smoke():
     )
     Z = enc.fit(X, y).transform(X)
     assert Z.shape == (24, 4)
-
