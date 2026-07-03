@@ -4,6 +4,7 @@ from dataclasses import dataclass
 
 import numpy as np
 import pandas as pd
+from sklearn.metrics import pairwise_distances
 from sklearn.metrics import (
     accuracy_score,
     average_precision_score,
@@ -23,6 +24,37 @@ class BinaryClassificationDiagnostics:
     confusion_counts: pd.DataFrame
     confusion_relative: pd.DataFrame
     positive_rate: float
+
+
+def classical_mds_2d(X, *, center=None, random_state=None) -> pd.DataFrame:
+    """Project a numeric matrix with classical metric MDS."""
+    X = np.asarray(X, dtype=float)
+    if len(X) == 0:
+        return pd.DataFrame(columns=["mds1", "mds2"])
+
+    if center is None:
+        c = np.nanmean(X, axis=0)
+    elif isinstance(center, str) and center == "random":
+        rng = np.random.default_rng(random_state)
+        c = X[int(rng.integers(0, len(X)))]
+    elif isinstance(center, (int, np.integer)):
+        c = X[int(center)]
+    else:
+        c = np.asarray(center, dtype=float)
+        if c.shape[0] != X.shape[1]:
+            raise ValueError("Explicit center dimensionality must match X")
+
+    D2 = pairwise_distances(X - c, metric="euclidean", squared=True)
+    n = D2.shape[0]
+    J = np.eye(n) - np.ones((n, n)) / n
+    B = -0.5 * J @ D2 @ J
+    vals, vecs = np.linalg.eigh(B)
+    order = np.argsort(vals)[::-1][:2]
+    vals = np.maximum(vals[order], 0)
+    coords = vecs[:, order] * np.sqrt(vals)
+    if coords.shape[1] < 2:
+        coords = np.pad(coords, ((0, 0), (0, 2 - coords.shape[1])))
+    return pd.DataFrame(coords, columns=["mds1", "mds2"])
 
 
 def binary_classification_diagnostics(
