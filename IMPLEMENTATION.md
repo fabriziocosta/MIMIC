@@ -82,6 +82,7 @@ The initial decoder helper constructors should be:
 
 * `LinearMixedFeatureDecoder()` or `MixedFeatureDecoder.linear()`: linear regression for regression targets and logistic regression for classification targets;
 * `MixedFeatureDecoder.random_forest()`: random forest regressor and random forest classifier;
+* `IdentityDecoder()`: direct coordinate decoder for identity/preprocessed-space generation baselines;
 * `ForestConditionalSampler()`: random-forest prediction plus stochastic conditional sampling for generation;
 * `MixedFeatureDecoder(regression_estimator=..., classification_estimator=...)`: custom scikit estimators supplied by the user.
 
@@ -90,7 +91,10 @@ The important requirement is that the combined decoder owns the type dispatch. M
 The initial encoder implementations should be:
 
 * `RandomForestPathEncoder`;
+* `IdentityEncoder`;
 * `ResNetEncoder`.
+
+`IdentityEncoder` is a special baseline encoder. Unlike ordinary MIMIC encoders, it receives the full modelled row after preprocessing, including the target feature. This is intentional: paired with `IdentityDecoder`, it makes generation operate in the preprocessed original feature space, recovering classical SMOTE-style interpolation and the displacement variant without a learned embedding.
 
 ## 3. Fitted Structure
 
@@ -668,6 +672,7 @@ MixedFeatureDecoder(
     regression_estimator=None,
     classification_estimator=None,
 )
+IdentityDecoder()
 ForestConditionalSampler(
     n_estimators=100,
     random_state=None,
@@ -682,6 +687,7 @@ and convenience constructors:
 LinearMixedFeatureDecoder()
 MixedFeatureDecoder.linear()
 MixedFeatureDecoder.random_forest()
+IdentityDecoder()
 ForestConditionalSampler()
 ```
 

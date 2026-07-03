@@ -86,6 +86,110 @@ class MixedFeatureDecoder(BaseEstimator):
         raise ValueError("task must be 'regression' or 'classification'")
 
 
+class IdentityDecoder(MixedFeatureDecoder):
+    """Decoder for identity/preprocessed-space generation baselines.
+
+    For regression targets, the decoder selects the embedding coordinate most
+    correlated with the scaled target. For classification targets, it selects
+    one coordinate per class, which corresponds to the target one-hot columns
+    when used with ``IdentityEncoder``.
+    """
+
+    def __init__(self):
+        super().__init__(regression_estimator=None, classification_estimator=None)
+
+    def fit(self, X, y=None):
+        self.models_ = {}
+        self.tasks_ = {}
+        return self
+
+    def fit_target(self, column: str, task: str, H, y):
+        if not hasattr(self, "models_"):
+            self.models_ = {}
+            self.tasks_ = {}
+        H = self._as_dense(H)
+        y_arr = np.asarray(y)
+        if task == "regression":
+            model = self._fit_regression_identity(H, y_arr)
+        elif task == "classification":
+            model = self._fit_classification_identity(H, y_arr)
+        else:
+            raise ValueError("task must be 'regression' or 'classification'")
+        self.models_[column] = model
+        self.tasks_[column] = task
+        return self
+
+    def predict_target(self, column: str, H):
+        check_is_fitted(self, "models_")
+        H = self._as_dense(H)
+        model = self.models_[column]
+        if self.tasks_[column] == "regression":
+            return H[:, model["feature_index"]]
+        proba = self._classification_scores(model, H)
+        return model["classes"][np.argmax(proba, axis=1)]
+
+    def predict_proba_target(self, column: str, H):
+        check_is_fitted(self, "models_")
+        if self.tasks_[column] != "classification":
+            raise ValueError(f"Decoder for {column!r} is not a classification decoder")
+        return self._classification_scores(self.models_[column], self._as_dense(H))
+
+    def decode(self, H, columns=None):
+        check_is_fitted(self, "models_")
+        columns = list(self.models_) if columns is None else list(columns)
+        data = {column: self.predict_target(column, H) for column in columns}
+        return pd.DataFrame(data)
+
+    @staticmethod
+    def _fit_regression_identity(H, y):
+        y = np.asarray(y, dtype=float)
+        y_centered = y - np.nanmean(y)
+        scores = []
+        for j in range(H.shape[1]):
+            x = np.asarray(H[:, j], dtype=float)
+            x_centered = x - np.nanmean(x)
+            denom = np.linalg.norm(x_centered) * np.linalg.norm(y_centered)
+            scores.append(0.0 if denom == 0 else abs(float(np.dot(x_centered, y_centered) / denom)))
+        return {"feature_index": int(np.argmax(scores))}
+
+    @staticmethod
+    def _fit_classification_identity(H, y):
+        classes = np.unique(y)
+        feature_indices = []
+        for cls in classes:
+            y_bin = (y == cls).astype(float)
+            if y_bin.max() == y_bin.min():
+                feature_indices.append(0)
+                continue
+            scores = []
+            for j in range(H.shape[1]):
+                x = np.asarray(H[:, j], dtype=float)
+                x_centered = x - np.nanmean(x)
+                y_centered = y_bin - np.nanmean(y_bin)
+                denom = np.linalg.norm(x_centered) * np.linalg.norm(y_centered)
+                scores.append(0.0 if denom == 0 else float(np.dot(x_centered, y_centered) / denom))
+            feature_indices.append(int(np.argmax(scores)))
+        return {"classes": classes, "feature_indices": np.asarray(feature_indices, dtype=int)}
+
+    @staticmethod
+    def _classification_scores(model, H):
+        scores = np.asarray(H[:, model["feature_indices"]], dtype=float)
+        scores = scores - np.nanmax(scores, axis=1, keepdims=True)
+        exp_scores = np.exp(scores)
+        row_sums = exp_scores.sum(axis=1, keepdims=True)
+        row_sums[row_sums == 0] = 1.0
+        return exp_scores / row_sums
+
+    @staticmethod
+    def _as_dense(H):
+        if hasattr(H, "toarray"):
+            return H.toarray()
+        arr = np.asarray(H)
+        if arr.ndim == 1:
+            arr = arr.reshape(-1, 1)
+        return arr
+
+
 def mean_regression_prediction(predictions):
     arr = np.asarray(predictions, dtype=float)
     return np.nanmean(arr, axis=0)

@@ -9,6 +9,8 @@ from scipy import sparse
 from mimic import (
     ForestConditionalSampler,
     GenerationPolicy,
+    IdentityDecoder,
+    IdentityEncoder,
     LinearMixedFeatureDecoder,
     MIMIC,
     MixedFeatureDecoder,
@@ -77,6 +79,24 @@ def test_linear_mixed_feature_decoder_regression_and_classification():
     assert set(decoder.predict_target("y", H)).issubset({"high", "low"})
     assert decoder.predict_proba_target("y", H).shape == (40, 2)
     assert isinstance(MixedFeatureDecoder.linear(), LinearMixedFeatureDecoder)
+
+
+def test_identity_encoder_and_decoder_recover_direct_coordinates():
+    rng = np.random.default_rng(12)
+    H = rng.normal(size=(40, 5))
+    y_reg = H[:, 2]
+    y_cls = np.where(H[:, 4] > H[:, 3], 1, 0)
+
+    encoder = IdentityEncoder()
+    Z = encoder.fit(sparse.csr_matrix(H), y_reg).transform(sparse.csr_matrix(H))
+    assert np.allclose(Z, H)
+
+    decoder = IdentityDecoder()
+    decoder.fit_target("x", "regression", H, y_reg)
+    decoder.fit_target("label", "classification", H, y_cls)
+    assert np.allclose(decoder.predict_target("x", H), y_reg)
+    assert set(decoder.predict_target("label", H)).issubset({0, 1})
+    assert decoder.predict_proba_target("label", H).shape == (40, 2)
 
 
 def test_forest_conditional_sampler_samples_with_trace():
@@ -178,6 +198,32 @@ def test_regression_targets_are_decoded_on_original_scale():
     generated = model.sample(20)
     assert generated["x"].between(df["x"].min() - 200, df["x"].max() + 200).all()
     assert generated["y"].between(df["y"].min() - 100, df["y"].max() + 100).all()
+
+
+def test_identity_encoder_decoder_generation_uses_full_row_context():
+    rng = np.random.default_rng(7)
+    df = pd.DataFrame(
+        {
+            "x": rng.normal(size=60),
+            "y": rng.normal(size=60),
+            "label": np.where(np.arange(60) % 2 == 0, "a", "b"),
+        }
+    )
+    model = MIMIC(
+        regression_columns=["x", "y"],
+        classification_columns=["label"],
+        encoder=IdentityEncoder(),
+        decoder=IdentityDecoder(),
+        policy=GenerationPolicy(method="smote", n_neighbors=4),
+        n_bootstrap=1,
+        random_state=7,
+    ).fit(df)
+
+    assert model.feature_modules_["x"].context_columns == ["x", "y", "label"]
+    samples, trace = model.sample(8, condition={"label": "a"}, return_trace=True)
+    assert samples.shape == (8, 3)
+    assert samples["label"].eq("a").all()
+    assert trace["method"].eq("smote").all()
 
 
 def test_sample_condition_restricts_anchor_rows():

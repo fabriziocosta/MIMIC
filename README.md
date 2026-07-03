@@ -31,3 +31,9 @@ instead of taking deterministic decoder predictions. It fits random-forest
 conditional samplers for each feature using `z_{-j}` embedding context, then
 `MIMIC.sample(..., return_trace=True)` returns both embedding-generation trace
 rows and per-cell Gibbs sampling trace rows.
+
+Use `IdentityEncoder()` with `IdentityDecoder()` for baseline generation in the
+preprocessed original feature space. With `GenerationPolicy(method="smote")`,
+this recovers a classical SMOTE-style interpolation baseline; with
+`method="displacement"`, it applies the same displacement idea without a learned
+embedding.

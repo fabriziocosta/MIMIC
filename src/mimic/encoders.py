@@ -15,6 +15,32 @@ from sklearn.preprocessing import OneHotEncoder
 from sklearn.utils.validation import check_is_fitted
 
 
+class IdentityEncoder(BaseEstimator, TransformerMixin):
+    """Pass-through encoder for original/preprocessed-space generation baselines.
+
+    MIMIC treats this encoder as a special generation baseline and gives it the
+    full modelled row rather than the usual target-excluded context.
+    """
+
+    include_target_context = True
+
+    def __init__(self, task: str = "regression", sparse: bool = False):
+        self.task = task
+        self.sparse = sparse
+
+    def fit(self, X, y=None):
+        if self.task not in {"regression", "classification"}:
+            raise ValueError("task must be 'regression' or 'classification'")
+        self.n_features_in_ = X.shape[1]
+        return self
+
+    def transform(self, X):
+        check_is_fitted(self, "n_features_in_")
+        if self.sparse:
+            return sparse.csr_matrix(X)
+        return X.toarray() if sparse.issparse(X) else np.asarray(X)
+
+
 class RandomForestPathEncoder(BaseEstimator, TransformerMixin):
     """Random-forest encoder using path or leaf sparse representations."""
 

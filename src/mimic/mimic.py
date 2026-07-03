@@ -134,7 +134,7 @@ class MIMIC(BaseEstimator, TransformerMixin):
             if task == "classification" and X.loc[observed_mask, column].nunique() < 2:
                 raise ValueError(f"Classification column {column!r} needs at least two observed classes")
 
-            context_columns = [c for c in self.model_columns_ if c != column]
+            context_columns = self._context_columns_for(column)
             label_encoder = None
             y_observed = X.loc[observed_mask, column]
             if task == "classification":
@@ -633,6 +633,11 @@ class MIMIC(BaseEstimator, TransformerMixin):
         numeric = [c for c in context_columns if c in self.regression_columns_]
         categorical = [c for c in context_columns if c in self.classification_columns_]
         return ContextPreprocessor(numeric_columns=numeric, categorical_columns=categorical)
+
+    def _context_columns_for(self, column: str):
+        if getattr(self.encoder, "include_target_context", False):
+            return list(self.model_columns_)
+        return [c for c in self.model_columns_ if c != column]
 
     def _new_encoder(self, task: str, bootstrap_index: int):
         encoder = self.encoder if self.encoder is not None else RandomForestPathEncoder(n_estimators=50, n_jobs=self.n_jobs)
