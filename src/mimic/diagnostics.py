@@ -57,6 +57,47 @@ def classical_mds_2d(X, *, center=None, random_state=None) -> pd.DataFrame:
     return pd.DataFrame(coords, columns=["mds1", "mds2"])
 
 
+def pairwise_feature_plot(
+    original: pd.DataFrame,
+    generated: pd.DataFrame,
+    *,
+    features: list[str],
+    original_label: str = "original",
+    generated_label: str = "generated",
+    max_rows_per_source: int | None = 300,
+    random_state=None,
+):
+    """Plot triangular pairwise feature statistics for original and generated rows."""
+    import seaborn as sns
+
+    original_plot = original[features].copy()
+    generated_plot = generated[features].copy()
+    if max_rows_per_source is not None:
+        original_plot = original_plot.sample(
+            n=min(max_rows_per_source, len(original_plot)),
+            random_state=random_state,
+        )
+        generated_plot = generated_plot.sample(
+            n=min(max_rows_per_source, len(generated_plot)),
+            random_state=random_state,
+        )
+
+    original_plot["source"] = original_label
+    generated_plot["source"] = generated_label
+    plot_data = pd.concat([original_plot, generated_plot], ignore_index=True)
+
+    return sns.pairplot(
+        plot_data,
+        vars=features,
+        hue="source",
+        corner=True,
+        diag_kind="hist",
+        height=2.2,
+        plot_kws={"alpha": 0.45, "s": 18, "edgecolor": "none"},
+        diag_kws={"alpha": 0.45, "common_norm": False},
+    )
+
+
 def binary_classification_diagnostics(
     y_true,
     y_pred,
