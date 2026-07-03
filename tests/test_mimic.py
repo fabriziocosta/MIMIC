@@ -135,6 +135,30 @@ def test_mimic_with_linear_mixed_feature_decoder():
     assert not imputed[["age", "outcome"]].isna().any().any()
 
 
+def test_regression_targets_are_decoded_on_original_scale():
+    rng = np.random.default_rng(4)
+    df = pd.DataFrame(
+        {
+            "x": rng.normal(1000.0, 50.0, 80),
+            "y": rng.normal(-500.0, 25.0, 80),
+            "label": np.where(np.arange(80) % 2 == 0, "a", "b"),
+        }
+    )
+    model = MIMIC(
+        regression_columns=["x", "y"],
+        classification_columns=["label"],
+        encoder=RandomForestPathEncoder(n_estimators=5, embedding_dim=3, random_state=4),
+        decoder=MixedFeatureDecoder.linear(),
+        policy=GenerationPolicy(method="displacement", n_neighbors=3, lambda_range=(0.0, 0.1)),
+        n_bootstrap=1,
+        random_state=4,
+    ).fit(df)
+
+    generated = model.sample(20)
+    assert generated["x"].between(df["x"].min() - 200, df["x"].max() + 200).all()
+    assert generated["y"].between(df["y"].min() - 100, df["y"].max() + 100).all()
+
+
 def test_classification_probability_alignment_when_bootstrap_misses_class():
     df = make_frame(n=60)
     df["rare"] = "common"

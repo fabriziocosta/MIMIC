@@ -86,6 +86,7 @@ class FeatureModule:
     members: list[BootstrapMember]
     observed_mask: pd.Series
     label_encoder: LabelEncoder | None = None
+    target_scaler: StandardScaler | None = None
     bias: float | None = None
     noise: float | None = None
     classes_: np.ndarray | None = None
@@ -140,8 +141,10 @@ class MIMIC(BaseEstimator, TransformerMixin):
                 label_encoder = LabelEncoder()
                 y_full = label_encoder.fit_transform(y_observed.astype(str))
                 classes = label_encoder.classes_
+                target_scaler = None
             else:
-                y_full = y_observed.astype(float).to_numpy()
+                target_scaler = StandardScaler()
+                y_full = target_scaler.fit_transform(y_observed.astype(float).to_numpy().reshape(-1, 1)).ravel()
                 classes = None
 
             members = []
@@ -178,7 +181,9 @@ class MIMIC(BaseEstimator, TransformerMixin):
                     H_oob = self._to_2d(encoder.transform(Xp_oob), width=H.shape[1])
                     pred = decoder.predict_target(column, H_oob)
                     if task == "regression":
-                        err = pred.astype(float) - y_full[oob_source].astype(float)
+                        pred_raw = self._inverse_regression_target(pred.astype(float), target_scaler)
+                        true_raw = self._inverse_regression_target(y_full[oob_source].astype(float), target_scaler)
+                        err = pred_raw - true_raw
                         oob_errors.extend(err.tolist())
 
             bias = float(np.mean(oob_errors)) if oob_errors else 0.0
@@ -190,6 +195,7 @@ class MIMIC(BaseEstimator, TransformerMixin):
                 members=members,
                 observed_mask=observed_mask,
                 label_encoder=label_encoder,
+                target_scaler=target_scaler,
                 bias=bias,
                 noise=noise,
                 classes_=classes,
@@ -370,7 +376,8 @@ class MIMIC(BaseEstimator, TransformerMixin):
             max_width = max(member.embedding_dim for member in module.members)
             for member in module.members:
                 H = self._member_embedding(member, module, X, max_width=member.embedding_dim)
-                preds.append(member.decoder.predict_target(column, H).astype(float))
+                pred_scaled = member.decoder.predict_target(column, H).astype(float)
+                preds.append(self._inverse_regression_target(pred_scaled, module.target_scaler))
             arr = np.vstack(preds)
             mean = arr.mean(axis=0)
             variance = arr.var(axis=0, ddof=1) if arr.shape[0] > 1 else np.zeros(arr.shape[1])
@@ -444,7 +451,8 @@ class MIMIC(BaseEstimator, TransformerMixin):
                 preds = []
                 for member in module.members:
                     b = self._to_2d(block, width=member.embedding_dim)[:, : member.embedding_dim]
-                    preds.append(member.decoder.predict_target(column, b).astype(float))
+                    pred_scaled = member.decoder.predict_target(column, b).astype(float)
+                    preds.append(self._inverse_regression_target(pred_scaled, module.target_scaler))
                 data[column] = np.vstack(preds).mean(axis=0)
             else:
                 probas = []
@@ -471,6 +479,12 @@ class MIMIC(BaseEstimator, TransformerMixin):
             aligned[missing, :] = 1.0 / n_classes
             row_sums = aligned.sum(axis=1)
         return aligned / row_sums[:, None]
+
+    def _inverse_regression_target(self, values, target_scaler):
+        arr = np.asarray(values, dtype=float).reshape(-1, 1)
+        if target_scaler is None:
+            return arr.ravel()
+        return target_scaler.inverse_transform(arr).ravel()
 
     def _validate_schema(self, X: pd.DataFrame):
         self.columns_ = list(X.columns)
