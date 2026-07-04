@@ -1,44 +1,89 @@
 # MIMIC
 
-MIMIC is a scikit-learn-style framework for feature-wise prediction, missing-value imputation, uncertainty diagnostics, and traceable synthetic tabular generation.
+MIMIC is a modular framework for working with mixed tabular data. It treats
+imputation, consistency checking, supervised prediction, uncertainty estimation,
+and synthetic data generation as variations of the same problem: predicting one
+feature from the rest of the row.
+
+The project is designed around a scikit-learn-style estimator with replaceable
+encoders, decoders, and generation policies. The current implementation includes
+tree-based, neural, linear, stochastic, and identity-style components so the same
+interface can be used for practical modelling, diagnostics, and baselines.
+
+## What MIMIC Does
+
+- Fills missing values in numerical and categorical columns.
+- Estimates confidence and uncertainty for feature-wise predictions.
+- Treats labels as ordinary columns, allowing supervised prediction through the
+  same imputation interface.
+- Generates synthetic tabular rows from learned representations or baseline
+  feature-space policies.
+- Keeps generation traceable by exposing the steps used to create synthetic
+  values.
+
+## Core Idea
+
+For each modelled column, MIMIC learns how to predict that column from the other
+columns. These feature-wise models produce latent representations, predictions,
+and uncertainty diagnostics. Because every column is handled through the same
+abstraction, the framework can support missing-value repair, label prediction,
+outlier-style inconsistency checks, and synthetic generation without separate
+task-specific pipelines.
+
+## Quick Example
 
 ```python
-from mimic import MIMIC, RandomForestPathEncoder, LinearMixedFeatureDecoder
+from mimic import MIMIC
 
 model = MIMIC(
     regression_columns=["age", "income"],
     classification_columns=["segment"],
     ignore_columns=["id"],
-    encoder=RandomForestPathEncoder(n_estimators=50),
-    decoder=LinearMixedFeatureDecoder(),
-    n_bootstrap=2,
     random_state=0,
 )
+
 model.fit(df)
+
 imputed = model.impute(df)
 confidence = model.confidence(df)
-synthetic, trace = model.sample(5, return_trace=True)
+synthetic = model.sample(100)
 ```
 
-See `WHITEPAPER.md`, `IMPLEMENTATION.md`, and the notebooks in `notebooks/` for details.
+## Installation
 
-Use `MixedFeatureDecoder.random_forest(...)` for random-forest decoding, or
-`LinearMixedFeatureDecoder(...)` / `MixedFeatureDecoder.linear()` for scikit-learn
-linear regression plus logistic regression decoding.
+Install the package in editable mode from the repository root:
 
-Use `ForestConditionalSampler(...)` when generation should sample feature values
-instead of taking deterministic decoder predictions. It fits random-forest
-conditional samplers for each feature using `z_{-j}` embedding context, then
-`MIMIC.sample(..., return_trace=True)` returns both embedding-generation trace
-rows and per-cell Gibbs sampling trace rows.
+```bash
+pip install -e .
+```
 
-Use `NeuralConditionalSampler(...)` for the same stochastic generation contract
-with neural conditional samplers. Numeric sampler targets use mixture density
-network negative log likelihood, so generated numeric cells can be sampled from
-multimodal conditional distributions.
+For notebook and test dependencies:
 
-Use `IdentityEncoder()` with `IdentityDecoder()` for baseline generation in the
-preprocessed original feature space. With `GenerationPolicy(method="smote")`,
-this recovers a classical SMOTE-style interpolation baseline; with
-`method="displacement"`, it applies the same displacement idea without a learned
-embedding.
+```bash
+pip install -e ".[dev]"
+```
+
+## Project Structure
+
+- `src/mimic/`: package source code.
+- `tests/`: regression and behaviour tests.
+- `notebooks/`: worked examples and operating-mode demonstrations.
+- `WHITEPAPER.md`: conceptual overview and motivation.
+- `IMPLEMENTATION.md`: implementation details and API design notes.
+
+## Development
+
+Run the test suite with:
+
+```bash
+pytest
+```
+
+The notebooks provide examples for basic usage, classification and regression,
+generation, oversampling, traceability, and alternative encoder/decoder choices.
+
+## Status
+
+MIMIC is an experimental research-oriented codebase. The public API is compact,
+but individual modelling components are still intended to be interchangeable as
+the framework evolves.
