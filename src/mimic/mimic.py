@@ -103,6 +103,7 @@ class MIMIC(BaseEstimator, TransformerMixin):
         encoder=None,
         decoder=None,
         policy=None,
+        generation_decode_mode: str = "auto",
         n_bootstrap: int = 2,
         random_state: int | None = None,
         n_jobs: int | None = None,
@@ -113,6 +114,7 @@ class MIMIC(BaseEstimator, TransformerMixin):
         self.encoder = encoder
         self.decoder = decoder
         self.policy = policy
+        self.generation_decode_mode = generation_decode_mode
         self.n_bootstrap = n_bootstrap
         self.random_state = random_state
         self.n_jobs = n_jobs
@@ -205,6 +207,7 @@ class MIMIC(BaseEstimator, TransformerMixin):
         self.train_embeddings_ = self.transform(X)
         self.embedding_slices_ = self._embedding_slices_
         self._fit_conditional_samplers()
+        self.generation_decode_mode_ = self._resolve_generation_decode_mode()
         self.policy_ = self._new_policy()
         self.policy_.validate()
         self.neighbour_index_ = self._fit_neighbours(self.train_embeddings_)
@@ -310,6 +313,8 @@ class MIMIC(BaseEstimator, TransformerMixin):
                     "neighbour_mode": self.policy_.neighbour_mode,
                     "condition": json.dumps(condition, sort_keys=True) if condition is not None else None,
                     "decoder": self._decoder_name(),
+                    "generation_decode_mode": self.generation_decode_mode,
+                    "resolved_generation_decode_mode": self.generation_decode_mode_,
                     "random_state": self.random_state,
                 }
             else:
@@ -328,6 +333,8 @@ class MIMIC(BaseEstimator, TransformerMixin):
                     "restriction": "basic",
                     "condition": json.dumps(condition, sort_keys=True) if condition is not None else None,
                     "decoder": self._decoder_name(),
+                    "generation_decode_mode": self.generation_decode_mode,
+                    "resolved_generation_decode_mode": self.generation_decode_mode_,
                     "random_state": self.random_state,
                 }
             synth_embeddings.append(h_new)
@@ -339,7 +346,7 @@ class MIMIC(BaseEstimator, TransformerMixin):
             for column, value in condition.items():
                 if column in X_new.columns:
                     X_new[column] = value
-        if self._has_stochastic_decoders():
+        if self.generation_decode_mode_ == "factorised":
             X_new, cell_traces = self._gibbs_sample_decoded(
                 H_new,
                 X_new,
@@ -555,6 +562,8 @@ class MIMIC(BaseEstimator, TransformerMixin):
                             "member_index": member_index,
                             "condition": json.dumps(condition, sort_keys=True) if condition else None,
                             "decoder": member.decoder.__class__.__name__,
+                            "generation_decode_mode": self.generation_decode_mode,
+                            "resolved_generation_decode_mode": self.generation_decode_mode_,
                         }
                         trace.update(detail)
                         traces.append(trace)
@@ -685,6 +694,25 @@ class MIMIC(BaseEstimator, TransformerMixin):
         if self.policy is None:
             return GenerationPolicy()
         return deepcopy(self.policy)
+
+    def _resolve_generation_decode_mode(self):
+        valid_modes = {"auto", "direct", "factorised", "joint"}
+        mode = self.generation_decode_mode
+        if mode not in valid_modes:
+            raise ValueError("generation_decode_mode must be one of 'auto', 'direct', 'factorised', or 'joint'")
+        if mode == "joint":
+            raise ValueError(
+                "generation_decode_mode='joint' requires conditional evidence and a fitted joint row decoder; "
+                "joint decoding is not implemented yet."
+            )
+        has_stochastic = self._has_stochastic_decoders()
+        if mode == "factorised" and not has_stochastic:
+            raise ValueError(
+                "generation_decode_mode='factorised' requires a decoder that supports conditional sampling."
+            )
+        if mode == "auto":
+            return "factorised" if has_stochastic else "direct"
+        return mode
 
     def _task_for(self, column: str):
         if column in self.regression_columns_:

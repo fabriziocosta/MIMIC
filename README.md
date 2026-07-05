@@ -49,6 +49,18 @@ confidence = model.confidence(df)
 synthetic = model.sample(100)
 ```
 
+Synthetic generation can choose how generated embeddings are decoded back to
+rows with `generation_decode_mode`:
+
+- `"auto"` preserves the default behaviour, using direct deterministic decoding
+  for ordinary decoders and factorised stochastic decoding for conditional
+  samplers.
+- `"direct"` uses feature-wise point predictions from the generated embedding.
+- `"factorised"` samples each non-conditioned feature from a fitted conditional
+  sampler such as `ForestConditionalSampler` or `NeuralConditionalSampler`.
+- `"joint"` is reserved for a future joint evidence decoder and currently raises
+  a clear validation error.
+
 ## Installation
 
 Install the package in editable mode from the repository root:

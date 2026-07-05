@@ -368,9 +368,18 @@ The method should:
 1. select anchor rows from the fitted training data;
 2. select neighbours according to the configured policy;
 3. generate synthetic embeddings;
-4. decode embeddings back into feature values;
-5. if the decoder supports stochastic sampling, run Gibbs-style conditional sampling over decoded rows;
+4. decode embeddings back into feature values according to `generation_decode_mode`;
+5. for factorised decoding, run Gibbs-style conditional sampling over decoded rows;
 6. optionally return trace records for embedding generation and per-cell sampling.
+
+`generation_decode_mode` accepts `"auto"`, `"direct"`, `"factorised"`, and
+`"joint"`. The default `"auto"` preserves compatibility: ordinary decoders
+resolve to `"direct"`, while fitted conditional samplers resolve to
+`"factorised"`. `"direct"` uses deterministic feature-wise predictions from the
+generated embedding. `"factorised"` uses conditional sampler evidence
+feature-by-feature and is stochastic in the current implementation. `"joint"` is
+reserved for a future row-level evidence decoder and currently raises a clear
+validation error during fitting.
 
 ### 8.1 Generation policy
 
@@ -497,7 +506,8 @@ $$
 w_{ij}(z_{-j})
 $$
 
-Generation with this decoder proceeds in two stages:
+Generation with this decoder proceeds in two stages when
+`generation_decode_mode` resolves to `"factorised"`:
 
 1. create an initial synthetic embedding with SMOTE or displacement and decode it deterministically;
 2. run three Gibbs refinement sweeps, sampling every non-conditioned feature from its `z_{-j}` forest conditional sampler.

@@ -4,6 +4,7 @@ matplotlib.use("Agg")
 
 import numpy as np
 import pandas as pd
+import pytest
 from scipy import sparse
 
 from mimic import (
@@ -232,6 +233,9 @@ def test_mimic_fit_transform_impute_confidence_sample_plot():
     synthetic, trace = model.sample(5, return_trace=True)
     assert synthetic.shape == (5, 4)
     assert {"sample_index", "method", "anchor_index", "lambda"}.issubset(trace.columns)
+    assert model.generation_decode_mode_ == "direct"
+    assert trace["trace_type"].eq("embedding").all()
+    assert trace["resolved_generation_decode_mode"].eq("direct").all()
 
     fig, axes = model.plot(df_missing, color_by="outcome", center="random")
     assert len(axes) == 2
@@ -372,6 +376,92 @@ def test_mimic_sample_with_forest_conditional_sampler_has_cell_trace():
     assert not cell_trace.empty
     assert {"sweep", "column", "sampled_value", "conditioning"}.issubset(cell_trace.columns)
     assert cell_trace["conditioning"].eq("z_minus_j").all()
+    assert model.generation_decode_mode_ == "factorised"
+    assert trace["resolved_generation_decode_mode"].eq("factorised").all()
+
+
+def test_generation_decode_mode_direct_suppresses_sampler_trace():
+    df = make_frame(n=45)
+    model = MIMIC(
+        ignore_columns=["id"],
+        regression_columns=["age", "income"],
+        classification_columns=["segment", "outcome"],
+        encoder=RandomForestPathEncoder(n_estimators=5, embedding_dim=4, random_state=10),
+        decoder=ForestConditionalSampler(n_estimators=8, random_state=10),
+        policy=GenerationPolicy(method="displacement", n_neighbors=3),
+        generation_decode_mode="direct",
+        n_bootstrap=1,
+        random_state=10,
+    ).fit(df)
+
+    samples, trace = model.sample(4, condition={"segment": "older"}, return_trace=True)
+
+    assert samples["segment"].eq("older").all()
+    assert model.generation_decode_mode_ == "direct"
+    assert trace["trace_type"].eq("embedding").all()
+    assert trace["resolved_generation_decode_mode"].eq("direct").all()
+
+
+def test_generation_decode_mode_factorised_produces_sampler_trace():
+    df = make_frame(n=45)
+    model = MIMIC(
+        ignore_columns=["id"],
+        regression_columns=["age", "income"],
+        classification_columns=["segment", "outcome"],
+        encoder=RandomForestPathEncoder(n_estimators=5, embedding_dim=4, random_state=13),
+        decoder=ForestConditionalSampler(n_estimators=8, random_state=13),
+        policy=GenerationPolicy(method="displacement", n_neighbors=3),
+        generation_decode_mode="factorised",
+        n_bootstrap=1,
+        random_state=13,
+    ).fit(df)
+
+    samples, trace = model.sample(4, condition={"segment": "older"}, return_trace=True)
+    cell_trace = trace[trace["trace_type"] == "cell"]
+
+    assert samples["segment"].eq("older").all()
+    assert model.generation_decode_mode_ == "factorised"
+    assert not cell_trace.empty
+    assert trace["resolved_generation_decode_mode"].eq("factorised").all()
+
+
+def test_generation_decode_mode_factorised_requires_sampler_capable_decoder():
+    df = make_frame(n=35)
+    model = MIMIC(
+        ignore_columns=["id"],
+        regression_columns=["age", "income"],
+        classification_columns=["segment", "outcome"],
+        encoder=RandomForestPathEncoder(n_estimators=4, embedding_dim=3, random_state=11),
+        decoder=LinearMixedFeatureDecoder(logistic_max_iter=500),
+        generation_decode_mode="factorised",
+        n_bootstrap=1,
+        random_state=11,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="generation_decode_mode='factorised' requires a decoder that supports conditional sampling",
+    ):
+        model.fit(df)
+
+
+def test_generation_decode_mode_invalid_and_joint_errors():
+    df = make_frame(n=35)
+    base_kwargs = {
+        "ignore_columns": ["id"],
+        "regression_columns": ["age", "income"],
+        "classification_columns": ["segment", "outcome"],
+        "encoder": RandomForestPathEncoder(n_estimators=4, embedding_dim=3, random_state=12),
+        "decoder": MixedFeatureDecoder.random_forest(n_estimators=4, random_state=12),
+        "n_bootstrap": 1,
+        "random_state": 12,
+    }
+
+    with pytest.raises(ValueError, match="generation_decode_mode must be one of"):
+        MIMIC(**base_kwargs, generation_decode_mode="unknown").fit(df)
+
+    with pytest.raises(ValueError, match="joint decoding is not implemented yet"):
+        MIMIC(**base_kwargs, generation_decode_mode="joint").fit(df)
 
 
 def test_mimic_sample_with_neural_conditional_sampler_has_mdn_cell_trace():
