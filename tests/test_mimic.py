@@ -21,6 +21,7 @@ from mimic import (
     sample,
     sample_dataframe,
 )
+from mimic.diagnostics import pairwise_feature_plot
 from mimic.mimic import GlobalContextPreprocessor
 
 
@@ -96,6 +97,49 @@ def test_global_context_preprocessor_context_slicing_and_unknown_categories():
     assert without_segment.shape[1] == 7
     assert not set(preprocessor.column_indices_["age"]) & set(preprocessor.encoded_indices_for(["income", "segment", "outcome"]))
     assert not set(preprocessor.column_indices_["segment"]) & set(preprocessor.encoded_indices_for(["age", "income", "outcome"]))
+
+
+def test_pairwise_feature_plot_diagonal_histograms_do_not_share_feature_y_axis():
+    original = pd.DataFrame(
+        {
+            "age": [20, 30, 40, 50],
+            "capital-gain": [0, 0, 1000, 100000],
+        }
+    )
+    generated = pd.DataFrame(
+        {
+            "age": [25, 35, 45, 55],
+            "capital-gain": [0, 0, 500, 1200],
+        }
+    )
+
+    grid = pairwise_feature_plot(
+        original,
+        generated,
+        features=["age", "capital-gain"],
+        max_rows_per_source=None,
+    )
+
+    twin_axes = [ax for ax in grid.fig.axes if ax not in grid.axes.flat]
+    assert len(twin_axes) == 2
+    assert max(ax.get_ylim()[1] for ax in twin_axes) < 10
+
+
+def test_pairwise_feature_plot_caps_histogram_bins():
+    original = pd.DataFrame({"x": np.linspace(0, 100, 200), "y": np.linspace(0, 10, 200)})
+    generated = pd.DataFrame({"x": np.linspace(5, 95, 200), "y": np.linspace(1, 9, 200)})
+
+    grid = pairwise_feature_plot(
+        original,
+        generated,
+        features=["x", "y"],
+        max_rows_per_source=None,
+        max_hist_bins=20,
+    )
+
+    twin_axes = [ax for ax in grid.fig.axes if ax not in grid.axes.flat]
+    for ax in twin_axes:
+        assert len(ax.patches) <= 40
 
 
 def test_random_forest_encoder_sparse_and_svd():

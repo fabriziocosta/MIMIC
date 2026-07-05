@@ -65,6 +65,7 @@ def pairwise_feature_plot(
     original_label: str = "original",
     generated_label: str = "generated",
     max_rows_per_source: int | None = 300,
+    max_hist_bins: int = 20,
     random_state=None,
 ):
     """Plot triangular pairwise feature statistics for original and generated rows."""
@@ -95,22 +96,36 @@ def pairwise_feature_plot(
         corner=True,
         height=2.2,
         palette=palette,
+        diag_sharey=False,
     )
     grid.map_lower(plt.scatter, alpha=0.45, s=18, edgecolor="none")
-    _map_log1p_filled_histograms(grid, plot_data, features, [original_label, generated_label], palette)
+    _map_log1p_filled_histograms(
+        grid,
+        plot_data,
+        features,
+        [original_label, generated_label],
+        palette,
+        max_bins=max_hist_bins,
+    )
     grid.add_legend()
     return grid
 
 
-def _map_log1p_filled_histograms(grid, plot_data, features, labels, palette):
+def _map_log1p_filled_histograms(grid, plot_data, features, labels, palette, max_bins: int = 20):
     for i, feature in enumerate(features):
-        ax = grid.axes[i, i]
-        if ax is None:
+        base_ax = grid.axes[i, i]
+        if base_ax is None:
             continue
+        ax = base_ax.twinx()
+        base_ax.set_yticks([])
         values = pd.to_numeric(plot_data[feature], errors="coerce").dropna()
         if values.empty:
             continue
-        bins = np.histogram_bin_edges(values.to_numpy(), bins="auto")
+        auto_bins = np.histogram_bin_edges(values.to_numpy(), bins="auto")
+        if max_bins is not None and len(auto_bins) - 1 > max_bins:
+            bins = np.linspace(auto_bins[0], auto_bins[-1], max_bins + 1)
+        else:
+            bins = auto_bins
         if len(bins) < 2:
             center = float(values.iloc[0])
             bins = np.array([center - 0.5, center + 0.5])
