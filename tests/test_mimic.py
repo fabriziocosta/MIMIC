@@ -21,6 +21,7 @@ from mimic import (
     sample,
     sample_dataframe,
 )
+from mimic.mimic import GlobalContextPreprocessor
 
 
 def make_frame(n=80, seed=0):
@@ -38,6 +39,63 @@ def make_frame(n=80, seed=0):
             "outcome": outcome,
         }
     )
+
+
+def make_mixed_preprocessing_frame():
+    return pd.DataFrame(
+        {
+            "id": [1, 2, 3, 4],
+            "age": [20.0, np.nan, 40.0, 50.0],
+            "income": [100.0, 120.0, np.nan, 180.0],
+            "segment": ["a", "b", np.nan, "a"],
+            "outcome": ["yes", "no", "yes", "no"],
+        }
+    )
+
+
+def test_global_context_preprocessor_maps_encoded_indices():
+    df = make_mixed_preprocessing_frame()
+    preprocessor = GlobalContextPreprocessor().fit(
+        df,
+        numeric_columns=["age", "income"],
+        categorical_columns=["segment", "outcome"],
+    )
+
+    Xp = preprocessor.transform_all(df)
+
+    assert Xp.shape == (4, 11)
+    assert preprocessor.output_dim_ == 11
+    assert preprocessor.numeric_value_indices_["age"].tolist() == [0]
+    assert preprocessor.numeric_value_indices_["income"].tolist() == [1]
+    assert preprocessor.categorical_onehot_indices_["segment"].tolist() == [2, 3, 4]
+    assert preprocessor.categorical_onehot_indices_["outcome"].tolist() == [5, 6]
+    assert preprocessor.missing_indicator_indices_["age"].tolist() == [7]
+    assert preprocessor.missing_indicator_indices_["income"].tolist() == [8]
+    assert preprocessor.missing_indicator_indices_["segment"].tolist() == [9]
+    assert preprocessor.missing_indicator_indices_["outcome"].tolist() == [10]
+    assert preprocessor.column_indices_["age"].tolist() == [0, 7]
+    assert preprocessor.column_indices_["segment"].tolist() == [2, 3, 4, 9]
+
+
+def test_global_context_preprocessor_context_slicing_and_unknown_categories():
+    df = make_mixed_preprocessing_frame()
+    preprocessor = GlobalContextPreprocessor().fit(
+        df,
+        numeric_columns=["age", "income"],
+        categorical_columns=["segment", "outcome"],
+    )
+    incoming = df.copy()
+    incoming.loc[0, "segment"] = "new"
+
+    Xp = preprocessor.transform_all(incoming)
+    without_age = preprocessor.context_matrix(Xp, ["income", "segment", "outcome"])
+    without_segment = preprocessor.context_matrix(Xp, ["age", "income", "outcome"])
+
+    assert Xp.shape[1] == preprocessor.output_dim_
+    assert without_age.shape[1] == 9
+    assert without_segment.shape[1] == 7
+    assert not set(preprocessor.column_indices_["age"]) & set(preprocessor.encoded_indices_for(["income", "segment", "outcome"]))
+    assert not set(preprocessor.column_indices_["segment"]) & set(preprocessor.encoded_indices_for(["age", "income", "outcome"]))
 
 
 def test_random_forest_encoder_sparse_and_svd():
@@ -639,10 +697,33 @@ def test_identity_encoder_decoder_generation_uses_full_row_context():
     ).fit(df)
 
     assert model.feature_modules_["x"].context_columns == ["x", "y", "label"]
+    assert model.feature_modules_["x"].context_indices.tolist() == list(
+        range(model.global_preprocessor_.output_dim_)
+    )
     samples, trace = model.sample(8, condition={"label": "a"}, return_trace=True)
     assert samples.shape == (8, 3)
     assert samples["label"].eq("a").all()
     assert trace["method"].eq("smote").all()
+
+
+def test_feature_module_context_indices_match_encoder_input_dimensions():
+    df = make_frame(n=50)
+    model = MIMIC(
+        columns={
+            "ignore": ["id"],
+            "regression": ["age", "income"],
+            "classification": ["segment", "outcome"],
+        },
+        encoder=RandomForestPathEncoder(n_estimators=4, embedding_dim=3, random_state=18),
+        decoder=MixedFeatureDecoder.random_forest(n_estimators=4, random_state=18),
+        n_bootstrap=2,
+        random_state=18,
+    ).fit(df)
+
+    for module in model.feature_modules_.values():
+        assert len(module.context_indices) < model.global_preprocessor_.output_dim_
+        for member in module.members:
+            assert member.encoder.forest_.n_features_in_ == len(module.context_indices)
 
 
 def test_sample_restores_original_model_column_order_and_integer_dtype():

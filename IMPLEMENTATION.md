@@ -173,7 +173,7 @@ self.ignore_columns_
 self.regression_columns_
 self.classification_columns_
 self.feature_modules_
-self.input_preprocessor_
+self.global_preprocessor_
 self.embedding_index_
 self.train_embeddings_
 self.train_index_
@@ -189,6 +189,8 @@ self.random_state_
     "column_name": FeatureModule(
         target_column="column_name",
         task="regression" | "classification",
+        context_columns=[...],
+        context_indices=np.ndarray(...),
         encoder_ensemble=[...],
         decoder_ensemble=[...],
         observed_mask=...,
@@ -198,14 +200,16 @@ self.random_state_
 }
 ```
 
-Each feature module is trained only on rows where its target column is not missing. For target column `j`, the training input is all modelled columns except `j`.
+Each feature module is trained only on rows where its target column is not missing. For target column `j`, the training input is the globally encoded modelled row sliced to the module context. Ordinary encoders use all modelled columns except `j`; encoders with `include_target_context=True` use all modelled columns, including `j`.
 
 ## 4. Fit Semantics
+
+At the start of fitting, MIMIC fits one global context preprocessor on all modelled columns. It imputes and scales numeric columns, imputes and one-hot encodes categorical columns, appends one missingness indicator per modelled input column, and stores a mapping from each original column to all encoded output indices produced by that column.
 
 For each modelled column `j`:
 
 1. Build a row mask selecting rows where `X[j]` is observed.
-2. Build the context matrix `X_{-j}` by removing `j` and all ignored columns.
+2. Build the context matrix by slicing the global encoded matrix to `FeatureModule.context_indices`.
 3. Fit the encoder ensemble on `X_{-j}`.
 4. Transform `X_{-j}` through each encoder to obtain embeddings.
 5. Fit the decoder ensemble to predict `X[j]` from the embeddings.
@@ -216,8 +220,9 @@ Bootstrapping is used to support uncertainty:
 ```text
 for b in range(n_bootstrap):
     sample observed rows with replacement
-    fit encoder_b on X_{-j}^{(b)}
-    fit decoder_b on E_b(X_{-j}^{(b)}) -> x_j^{(b)}
+    slice rows and encoded context columns from the global matrix
+    fit encoder_b on X_context^{(b)}
+    fit decoder_b on E_b(X_context^{(b)}) -> x_j^{(b)}
 ```
 
 The initial implementation can fit one encoder-decoder pair per bootstrap member and combine their predictions at inference time.
@@ -828,15 +833,16 @@ Internal preprocessing should handle:
 * categorical encoding for context columns;
 * missing context values during feature-wise training and inference.
 
-A pragmatic first version can use:
+MIMIC uses one fitted global context preprocessor for encoder inputs:
 
 * `SimpleImputer` for context missingness;
 * `OneHotEncoder(handle_unknown="ignore")` for categorical context columns;
 * `StandardScaler` for numeric context columns used by linear or neural models.
+* encoded index groups so each target context can remove every encoded contribution of the target column, including one-hot values and missing indicators.
 
 Important caveat: MIMIC may need both preprocessing and postprocessing layers around the encoder and decoder estimators. Many scikit-learn estimators require numeric arrays, scaled continuous inputs, or integer-coded targets. For example, regression features may need `StandardScaler`, categorical context variables may need one-hot encoding, and classification targets may need a `LabelEncoder` or equivalent class-index mapping. These transformations must be stored as fitted state and inverted where appropriate so that `impute` and `sample` return values in the original dataframe schema, not encoded internal representations.
 
-This means the fitted feature module should own target-side preprocessing as well as context-side preprocessing. For a classification target, the module should store the mapping between original labels and internal class IDs. For a scaled regression target, it should inverse-transform predictions before returning them to the user. Confidence calculations may use internal numeric representations, but reported predictions, observed values, residuals, and trace metadata should refer back to original column names and user-facing values whenever possible.
+This means the estimator owns global context-side preprocessing, while each fitted feature module owns target-side preprocessing. For a classification target, the module should store the mapping between original labels and internal class IDs. For a scaled regression target, it should inverse-transform predictions before returning them to the user. Confidence calculations may use internal numeric representations, but reported predictions, observed values, residuals, and trace metadata should refer back to original column names and user-facing values whenever possible.
 
 The target column itself should not be imputed before fitting its module. Rows with missing target values are excluded for that module.
 

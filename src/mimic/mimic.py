@@ -71,8 +71,103 @@ class ContextPreprocessor:
 
 
 @dataclass
+class GlobalContextPreprocessor:
+    include_missing_indicators: bool = True
+
+    def fit(self, X: pd.DataFrame, numeric_columns: list[str], categorical_columns: list[str]):
+        X = pd.DataFrame(X)
+        self.numeric_columns_ = [c for c in numeric_columns if c in X.columns]
+        self.categorical_columns_ = [c for c in categorical_columns if c in X.columns]
+        self.model_columns_ = self.numeric_columns_ + self.categorical_columns_
+
+        if self.numeric_columns_:
+            self.numeric_imputer_ = SimpleImputer(strategy="median")
+            self.scaler_ = StandardScaler()
+            X_num = self.numeric_imputer_.fit_transform(X[self.numeric_columns_])
+            self.scaler_.fit(X_num)
+        else:
+            self.numeric_imputer_ = None
+            self.scaler_ = None
+
+        if self.categorical_columns_:
+            self.categorical_imputer_ = SimpleImputer(strategy="constant", fill_value="__missing__")
+            self.onehot_ = OneHotEncoder(handle_unknown="ignore", sparse_output=True)
+            X_cat = self.categorical_imputer_.fit_transform(X[self.categorical_columns_].astype("object"))
+            self.onehot_.fit(X_cat)
+        else:
+            self.categorical_imputer_ = None
+            self.onehot_ = None
+
+        self._build_column_indices()
+        return self
+
+    def transform_all(self, X: pd.DataFrame):
+        X = pd.DataFrame(X)
+        parts = []
+        if self.numeric_columns_:
+            X_num = self.numeric_imputer_.transform(X[self.numeric_columns_])
+            X_num = self.scaler_.transform(X_num)
+            parts.append(sparse.csr_matrix(X_num))
+        if self.categorical_columns_:
+            X_cat = self.categorical_imputer_.transform(X[self.categorical_columns_].astype("object"))
+            parts.append(self.onehot_.transform(X_cat).tocsr())
+        if self.include_missing_indicators and self.model_columns_:
+            missing = X[self.model_columns_].isna().astype(float).to_numpy()
+            parts.append(sparse.csr_matrix(missing))
+        if not parts:
+            return sparse.csr_matrix((len(X), 0))
+        return sparse.hstack(parts, format="csr")
+
+    def context_matrix(self, Xp_all, context_columns: list[str]):
+        return Xp_all[:, self.encoded_indices_for(context_columns)]
+
+    def encoded_indices_for(self, columns: list[str]):
+        indices = []
+        for column in columns:
+            indices.extend(self.column_indices_.get(column, []))
+        return np.asarray(sorted(indices), dtype=int)
+
+    def encoded_indices_without(self, excluded_columns: list[str]):
+        excluded = set(excluded_columns)
+        columns = [column for column in self.model_columns_ if column not in excluded]
+        return self.encoded_indices_for(columns)
+
+    def _build_column_indices(self):
+        self.column_indices_ = {column: [] for column in self.model_columns_}
+        self.numeric_value_indices_ = {}
+        self.categorical_onehot_indices_ = {}
+        self.missing_indicator_indices_ = {}
+
+        offset = 0
+        for column in self.numeric_columns_:
+            idx = np.asarray([offset], dtype=int)
+            self.numeric_value_indices_[column] = idx
+            self.column_indices_[column].extend(idx.tolist())
+            offset += 1
+
+        for column, categories in zip(self.categorical_columns_, getattr(self.onehot_, "categories_", [])):
+            width = len(categories)
+            idx = np.arange(offset, offset + width, dtype=int)
+            self.categorical_onehot_indices_[column] = idx
+            self.column_indices_[column].extend(idx.tolist())
+            offset += width
+
+        if self.include_missing_indicators:
+            for column in self.model_columns_:
+                idx = np.asarray([offset], dtype=int)
+                self.missing_indicator_indices_[column] = idx
+                self.column_indices_[column].extend(idx.tolist())
+                offset += 1
+
+        self.column_indices_ = {
+            column: np.asarray(indices, dtype=int)
+            for column, indices in self.column_indices_.items()
+        }
+        self.output_dim_ = offset
+
+
+@dataclass
 class BootstrapMember:
-    preprocessor: ContextPreprocessor
     encoder: object
     decoder: MixedFeatureDecoder
     embedding_dim: int
@@ -83,6 +178,7 @@ class FeatureModule:
     target_column: str
     task: str
     context_columns: list[str]
+    context_indices: np.ndarray
     members: list[BootstrapMember]
     observed_mask: pd.Series
     label_encoder: LabelEncoder | None = None
@@ -130,7 +226,6 @@ class MIMIC(BaseEstimator, TransformerMixin):
         self.train_index_ = X.index.copy()
         self.input_dtypes_ = X.dtypes.to_dict()
         self.feature_modules_ = {}
-
         for column in self.model_columns_:
             task = self._task_for(column)
             observed_mask = X[column].notna()
@@ -140,7 +235,21 @@ class MIMIC(BaseEstimator, TransformerMixin):
             if task == "classification" and X.loc[observed_mask, column].nunique() < 2:
                 raise ValueError(f"Classification column {column!r} needs at least two observed classes")
 
+        self.global_preprocessor_ = GlobalContextPreprocessor(include_missing_indicators=True)
+        self.global_preprocessor_.fit(
+            X,
+            numeric_columns=self.regression_columns_,
+            categorical_columns=self.classification_columns_,
+        )
+        Xp_all = self.global_preprocessor_.transform_all(X)
+
+        for column in self.model_columns_:
+            task = self._task_for(column)
+            observed_mask = X[column].notna()
+            observed_indices = np.flatnonzero(observed_mask.to_numpy())
+
             context_columns = self._context_columns_for(column)
+            context_indices = self.global_preprocessor_.encoded_indices_for(context_columns)
             label_encoder = None
             y_observed = X.loc[observed_mask, column]
             if task == "classification":
@@ -161,9 +270,7 @@ class MIMIC(BaseEstimator, TransformerMixin):
                 sampled_observed_positions = sample_pos
                 sampled_y = y_full[sampled_observed_positions]
 
-                X_context_sample = X.iloc[sample_rows][context_columns]
-                preprocessor = self._new_context_preprocessor(context_columns)
-                Xp = preprocessor.fit(X_context_sample).transform(X_context_sample)
+                Xp = Xp_all[sample_rows][:, context_indices]
 
                 encoder = self._new_encoder(task, b)
                 encoder.fit(Xp, sampled_y)
@@ -173,7 +280,6 @@ class MIMIC(BaseEstimator, TransformerMixin):
                 decoder.fit_target(column, task, H, sampled_y)
                 members.append(
                     BootstrapMember(
-                        preprocessor=preprocessor,
                         encoder=encoder,
                         decoder=decoder,
                         embedding_dim=H.shape[1],
@@ -183,7 +289,7 @@ class MIMIC(BaseEstimator, TransformerMixin):
                 oob_source = np.setdiff1d(np.arange(len(observed_indices)), np.unique(sampled_observed_positions))
                 if len(oob_source):
                     oob_rows = observed_indices[oob_source]
-                    Xp_oob = preprocessor.transform(X.iloc[oob_rows][context_columns])
+                    Xp_oob = Xp_all[oob_rows][:, context_indices]
                     H_oob = self._to_2d(encoder.transform(Xp_oob), width=H.shape[1])
                     pred = decoder.predict_target(column, H_oob)
                     if task == "regression":
@@ -198,6 +304,7 @@ class MIMIC(BaseEstimator, TransformerMixin):
                 target_column=column,
                 task=task,
                 context_columns=context_columns,
+                context_indices=context_indices,
                 members=members,
                 observed_mask=observed_mask,
                 label_encoder=label_encoder,
@@ -221,14 +328,15 @@ class MIMIC(BaseEstimator, TransformerMixin):
     def transform(self, X):
         check_is_fitted(self, "feature_modules_")
         X = self._as_dataframe(X)
+        Xp_all = self.global_preprocessor_.transform_all(X)
         parts = []
         self._embedding_slices_ = {}
         start = 0
         for column, module in self.feature_modules_.items():
             embeddings = []
             max_width = max(member.embedding_dim for member in module.members)
+            Xp = Xp_all[:, module.context_indices]
             for member in module.members:
-                Xp = member.preprocessor.transform(X[module.context_columns])
                 emb = self._to_2d(member.encoder.transform(Xp), width=max_width)
                 embeddings.append(emb)
             block = np.mean(np.stack(embeddings, axis=0), axis=0)
@@ -411,11 +519,12 @@ class MIMIC(BaseEstimator, TransformerMixin):
 
     def _predict_column(self, X: pd.DataFrame, column: str):
         module = self.feature_modules_[column]
+        Xp_all = self.global_preprocessor_.transform_all(X)
         if module.task == "regression":
             preds = []
             max_width = max(member.embedding_dim for member in module.members)
             for member in module.members:
-                H = self._member_embedding(member, module, X, max_width=member.embedding_dim)
+                H = self._member_embedding(member, module, X, Xp_all=Xp_all, max_width=member.embedding_dim)
                 pred_scaled = member.decoder.predict_target(column, H).astype(float)
                 preds.append(self._inverse_regression_target(pred_scaled, module.target_scaler))
             arr = np.vstack(preds)
@@ -430,7 +539,7 @@ class MIMIC(BaseEstimator, TransformerMixin):
         probas = []
         votes = []
         for member in module.members:
-            H = self._member_embedding(member, module, X, max_width=member.embedding_dim)
+            H = self._member_embedding(member, module, X, Xp_all=Xp_all, max_width=member.embedding_dim)
             p = self._aligned_predict_proba(member, module, column, H)
             probas.append(p)
             votes.append(np.argmax(p, axis=1))
@@ -478,8 +587,17 @@ class MIMIC(BaseEstimator, TransformerMixin):
         }
         return pred_labels, details
 
-    def _member_embedding(self, member: BootstrapMember, module: FeatureModule, X: pd.DataFrame, max_width: int | None = None):
-        Xp = member.preprocessor.transform(X[module.context_columns])
+    def _member_embedding(
+        self,
+        member: BootstrapMember,
+        module: FeatureModule,
+        X: pd.DataFrame,
+        Xp_all=None,
+        max_width: int | None = None,
+    ):
+        if Xp_all is None:
+            Xp_all = self.global_preprocessor_.transform_all(X)
+        Xp = Xp_all[:, module.context_indices]
         return self._to_2d(member.encoder.transform(Xp), width=max_width)
 
     def _decode_embeddings(self, H):
