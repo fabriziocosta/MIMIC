@@ -97,9 +97,7 @@ class MIMIC(BaseEstimator, TransformerMixin):
 
     def __init__(
         self,
-        ignore_columns=None,
-        regression_columns=None,
-        classification_columns=None,
+        columns=None,
         encoder=None,
         decoder=None,
         policy=None,
@@ -111,9 +109,7 @@ class MIMIC(BaseEstimator, TransformerMixin):
         random_state: int | None = None,
         n_jobs: int | None = None,
     ):
-        self.ignore_columns = ignore_columns
-        self.regression_columns = regression_columns
-        self.classification_columns = classification_columns
+        self.columns = columns
         self.encoder = encoder
         self.decoder = decoder
         self.policy = policy
@@ -684,18 +680,21 @@ class MIMIC(BaseEstimator, TransformerMixin):
 
     def _validate_schema(self, X: pd.DataFrame):
         self.columns_ = list(X.columns)
-        self.ignore_columns_ = list(self.ignore_columns or [])
-        missing_ignored = set(self.ignore_columns_) - set(X.columns)
-        if missing_ignored:
-            raise ValueError(f"Unknown ignore_columns: {sorted(missing_ignored)}")
-
-        if self.regression_columns is None and self.classification_columns is None:
+        if self.columns is None:
+            self.ignore_columns_ = []
             model_cols = [c for c in X.columns if c not in self.ignore_columns_]
             self.regression_columns_ = [c for c in model_cols if pd.api.types.is_numeric_dtype(X[c])]
             self.classification_columns_ = [c for c in model_cols if c not in self.regression_columns_]
         else:
-            self.regression_columns_ = list(self.regression_columns or [])
-            self.classification_columns_ = list(self.classification_columns or [])
+            if not isinstance(self.columns, dict):
+                raise ValueError("columns must be a mapping with 'ignore', 'regression', and 'classification' lists")
+            allowed = {"ignore", "regression", "classification"}
+            unknown_keys = set(self.columns) - allowed
+            if unknown_keys:
+                raise ValueError("columns must only contain 'ignore', 'regression', and 'classification'")
+            self.ignore_columns_ = list(self.columns.get("ignore", []))
+            self.regression_columns_ = list(self.columns.get("regression", []))
+            self.classification_columns_ = list(self.columns.get("classification", []))
 
         declared = set(self.ignore_columns_) | set(self.regression_columns_) | set(self.classification_columns_)
         missing = declared - set(X.columns)

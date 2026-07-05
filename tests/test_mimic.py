@@ -264,9 +264,11 @@ def test_mimic_fit_transform_impute_confidence_sample_plot():
     df_missing.loc[[5], "segment"] = np.nan
 
     model = MIMIC(
-        ignore_columns=["id"],
-        regression_columns=["age", "income"],
-        classification_columns=["segment", "outcome"],
+        columns={
+            "ignore": ["id"],
+            "regression": ["age", "income"],
+            "classification": ["segment", "outcome"],
+        },
         encoder=RandomForestPathEncoder(n_estimators=6, embedding_dim=4, random_state=0),
         decoder=MixedFeatureDecoder.random_forest(n_estimators=6, random_state=0),
         policy=GenerationPolicy(method="smote", n_neighbors=3),
@@ -298,6 +300,63 @@ def test_mimic_fit_transform_impute_confidence_sample_plot():
     fig.canvas.draw()
 
 
+def test_columns_dict_role_parsing_and_missing_keys():
+    df = pd.DataFrame(
+        {
+            "id": [1, 2, 3, 4],
+            "x": [1.0, 2.0, 3.0, 4.0],
+        }
+    )
+
+    model = MIMIC(
+        columns={
+            "ignore": ["id"],
+            "regression": ["x"],
+        },
+        mode="identity",
+    ).fit(df)
+
+    assert model.columns_ == ["id", "x"]
+    assert model.ignore_columns_ == ["id"]
+    assert model.regression_columns_ == ["x"]
+    assert model.classification_columns_ == []
+    assert model.model_columns_ == ["x"]
+
+
+def test_columns_none_infers_numeric_and_classification_roles():
+    df = pd.DataFrame(
+        {
+            "x": [1.0, 2.0, 3.0, 4.0],
+            "label": ["a", "b", "a", "b"],
+        }
+    )
+
+    model = MIMIC(mode="identity").fit(df)
+
+    assert model.ignore_columns_ == []
+    assert model.regression_columns_ == ["x"]
+    assert model.classification_columns_ == ["label"]
+
+
+def test_columns_dict_validation_errors():
+    df = pd.DataFrame(
+        {
+            "id": [1, 2, 3, 4],
+            "x": [1.0, 2.0, 3.0, 4.0],
+            "label": ["a", "b", "a", "b"],
+        }
+    )
+
+    with pytest.raises(ValueError, match="columns must only contain"):
+        MIMIC(columns={"regression": ["x"], "target": ["label"]}).fit(df)
+
+    with pytest.raises(ValueError, match="Columns cannot appear in multiple roles"):
+        MIMIC(columns={"regression": ["x"], "classification": ["x", "label"], "ignore": ["id"]}).fit(df)
+
+    with pytest.raises(ValueError, match="Every non-ignored column needs a task"):
+        MIMIC(columns={"regression": ["x"]}).fit(df)
+
+
 def test_mode_identity_uses_identity_components_and_default_generation_policy():
     df = pd.DataFrame(
         {
@@ -306,8 +365,10 @@ def test_mode_identity_uses_identity_components_and_default_generation_policy():
         }
     )
     model = MIMIC(
-        regression_columns=["x"],
-        classification_columns=["label"],
+        columns={
+            "regression": ["x"],
+            "classification": ["label"],
+        },
         mode="identity",
         random_state=20,
     ).fit(df)
@@ -335,14 +396,18 @@ def test_numeric_mode_and_legacy_level_aliases_resolve_to_modes():
     )
 
     numeric = MIMIC(
-        regression_columns=["x"],
-        classification_columns=["label"],
+        columns={
+            "regression": ["x"],
+            "classification": ["label"],
+        },
         mode=0,
         random_state=24,
     ).fit(df)
     legacy = MIMIC(
-        regression_columns=["x"],
-        classification_columns=["label"],
+        columns={
+            "regression": ["x"],
+            "classification": ["label"],
+        },
         level=0,
         random_state=24,
     ).fit(df)
@@ -384,9 +449,11 @@ def test_capacity_scales_preset_hyperparameters():
 def test_mode_factorised_uses_neural_decoder_preset():
     df = make_frame(n=36)
     model = MIMIC(
-        ignore_columns=["id"],
-        regression_columns=["age", "income"],
-        classification_columns=["segment", "outcome"],
+        columns={
+            "ignore": ["id"],
+            "regression": ["age", "income"],
+            "classification": ["segment", "outcome"],
+        },
         encoder=RandomForestPathEncoder(n_estimators=4, embedding_dim=3, random_state=21),
         mode="factorised",
         capacity=0.0,
@@ -409,9 +476,11 @@ def test_mode_factorised_uses_neural_decoder_preset():
 def test_mode_joint_uses_neural_decoder_preset():
     df = make_frame(n=36)
     model = MIMIC(
-        ignore_columns=["id"],
-        regression_columns=["age", "income"],
-        classification_columns=["segment", "outcome"],
+        columns={
+            "ignore": ["id"],
+            "regression": ["age", "income"],
+            "classification": ["segment", "outcome"],
+        },
         encoder=RandomForestPathEncoder(n_estimators=4, embedding_dim=3, random_state=22),
         mode="joint",
         capacity=0.0,
@@ -430,9 +499,11 @@ def test_mode_joint_uses_neural_decoder_preset():
 def test_custom_decoder_with_default_mode_keeps_auto_decode_resolution():
     df = make_frame(n=35)
     model = MIMIC(
-        ignore_columns=["id"],
-        regression_columns=["age", "income"],
-        classification_columns=["segment", "outcome"],
+        columns={
+            "ignore": ["id"],
+            "regression": ["age", "income"],
+            "classification": ["segment", "outcome"],
+        },
         encoder=RandomForestPathEncoder(n_estimators=4, embedding_dim=3, random_state=23),
         decoder=LinearMixedFeatureDecoder(logistic_max_iter=500),
         n_bootstrap=1,
@@ -450,9 +521,11 @@ def test_mimic_with_linear_mixed_feature_decoder():
     df.loc[[0, 1], "age"] = np.nan
     df.loc[[2, 3], "outcome"] = np.nan
     model = MIMIC(
-        ignore_columns=["id"],
-        regression_columns=["age", "income"],
-        classification_columns=["segment", "outcome"],
+        columns={
+            "ignore": ["id"],
+            "regression": ["age", "income"],
+            "classification": ["segment", "outcome"],
+        },
         encoder=RandomForestPathEncoder(n_estimators=5, embedding_dim=4, random_state=2),
         decoder=LinearMixedFeatureDecoder(logistic_max_iter=500),
         n_bootstrap=1,
@@ -473,8 +546,10 @@ def test_regression_targets_are_decoded_on_original_scale():
         }
     )
     model = MIMIC(
-        regression_columns=["x", "y"],
-        classification_columns=["label"],
+        columns={
+            "regression": ["x", "y"],
+            "classification": ["label"],
+        },
         encoder=RandomForestPathEncoder(n_estimators=5, embedding_dim=3, random_state=4),
         decoder=MixedFeatureDecoder.linear(),
         policy=GenerationPolicy(method="displacement", n_neighbors=3, lambda_range=(0.0, 0.1)),
@@ -497,8 +572,10 @@ def test_identity_encoder_decoder_generation_uses_full_row_context():
         }
     )
     model = MIMIC(
-        regression_columns=["x", "y"],
-        classification_columns=["label"],
+        columns={
+            "regression": ["x", "y"],
+            "classification": ["label"],
+        },
         encoder=IdentityEncoder(),
         decoder=IdentityDecoder(),
         policy=GenerationPolicy(method="smote", n_neighbors=4),
@@ -524,9 +601,11 @@ def test_sample_restores_original_model_column_order_and_integer_dtype():
         }
     )
     model = MIMIC(
-        ignore_columns=["id"],
-        regression_columns=["count", "score"],
-        classification_columns=["label"],
+        columns={
+            "ignore": ["id"],
+            "regression": ["count", "score"],
+            "classification": ["label"],
+        },
         encoder=IdentityEncoder(),
         decoder=IdentityDecoder(),
         policy=GenerationPolicy(method="smote", n_neighbors=4),
@@ -543,9 +622,11 @@ def test_sample_restores_original_model_column_order_and_integer_dtype():
 def test_sample_condition_restricts_anchor_rows():
     df = make_frame(n=50)
     model = MIMIC(
-        ignore_columns=["id"],
-        regression_columns=["age", "income"],
-        classification_columns=["segment", "outcome"],
+        columns={
+            "ignore": ["id"],
+            "regression": ["age", "income"],
+            "classification": ["segment", "outcome"],
+        },
         encoder=RandomForestPathEncoder(n_estimators=5, embedding_dim=4, random_state=5),
         decoder=MixedFeatureDecoder.random_forest(n_estimators=5, random_state=5),
         policy=GenerationPolicy(method="displacement", n_neighbors=3),
@@ -563,9 +644,11 @@ def test_sample_condition_restricts_anchor_rows():
 def test_mimic_sample_with_forest_conditional_sampler_has_cell_trace():
     df = make_frame(n=45)
     model = MIMIC(
-        ignore_columns=["id"],
-        regression_columns=["age", "income"],
-        classification_columns=["segment", "outcome"],
+        columns={
+            "ignore": ["id"],
+            "regression": ["age", "income"],
+            "classification": ["segment", "outcome"],
+        },
         encoder=RandomForestPathEncoder(n_estimators=5, embedding_dim=4, random_state=6),
         decoder=ForestConditionalSampler(n_estimators=8, random_state=6),
         policy=GenerationPolicy(method="displacement", n_neighbors=3),
@@ -586,9 +669,11 @@ def test_mimic_sample_with_forest_conditional_sampler_has_cell_trace():
 def test_generation_decode_mode_direct_suppresses_sampler_trace():
     df = make_frame(n=45)
     model = MIMIC(
-        ignore_columns=["id"],
-        regression_columns=["age", "income"],
-        classification_columns=["segment", "outcome"],
+        columns={
+            "ignore": ["id"],
+            "regression": ["age", "income"],
+            "classification": ["segment", "outcome"],
+        },
         encoder=RandomForestPathEncoder(n_estimators=5, embedding_dim=4, random_state=10),
         decoder=ForestConditionalSampler(n_estimators=8, random_state=10),
         policy=GenerationPolicy(method="displacement", n_neighbors=3),
@@ -608,9 +693,11 @@ def test_generation_decode_mode_direct_suppresses_sampler_trace():
 def test_generation_decode_mode_factorised_produces_sampler_trace():
     df = make_frame(n=45)
     model = MIMIC(
-        ignore_columns=["id"],
-        regression_columns=["age", "income"],
-        classification_columns=["segment", "outcome"],
+        columns={
+            "ignore": ["id"],
+            "regression": ["age", "income"],
+            "classification": ["segment", "outcome"],
+        },
         encoder=RandomForestPathEncoder(n_estimators=5, embedding_dim=4, random_state=13),
         decoder=ForestConditionalSampler(n_estimators=8, random_state=13),
         policy=GenerationPolicy(method="displacement", n_neighbors=3),
@@ -631,9 +718,11 @@ def test_generation_decode_mode_factorised_produces_sampler_trace():
 def test_generation_decode_mode_factorised_requires_sampler_capable_decoder():
     df = make_frame(n=35)
     model = MIMIC(
-        ignore_columns=["id"],
-        regression_columns=["age", "income"],
-        classification_columns=["segment", "outcome"],
+        columns={
+            "ignore": ["id"],
+            "regression": ["age", "income"],
+            "classification": ["segment", "outcome"],
+        },
         encoder=RandomForestPathEncoder(n_estimators=4, embedding_dim=3, random_state=11),
         decoder=LinearMixedFeatureDecoder(logistic_max_iter=500),
         generation_decode_mode="factorised",
@@ -651,9 +740,11 @@ def test_generation_decode_mode_factorised_requires_sampler_capable_decoder():
 def test_generation_decode_mode_invalid_error():
     df = make_frame(n=35)
     base_kwargs = {
-        "ignore_columns": ["id"],
-        "regression_columns": ["age", "income"],
-        "classification_columns": ["segment", "outcome"],
+        "columns": {
+            "ignore": ["id"],
+            "regression": ["age", "income"],
+            "classification": ["segment", "outcome"],
+        },
         "encoder": RandomForestPathEncoder(n_estimators=4, embedding_dim=3, random_state=12),
         "decoder": MixedFeatureDecoder.random_forest(n_estimators=4, random_state=12),
         "n_bootstrap": 1,
@@ -676,9 +767,11 @@ def test_generation_decode_mode_invalid_error():
 def test_generation_decode_mode_joint_requires_neural_decoder():
     df = make_frame(n=35)
     base_kwargs = {
-        "ignore_columns": ["id"],
-        "regression_columns": ["age", "income"],
-        "classification_columns": ["segment", "outcome"],
+        "columns": {
+            "ignore": ["id"],
+            "regression": ["age", "income"],
+            "classification": ["segment", "outcome"],
+        },
         "encoder": RandomForestPathEncoder(n_estimators=4, embedding_dim=3, random_state=12),
         "n_bootstrap": 1,
         "random_state": 12,
@@ -697,9 +790,11 @@ def test_generation_decode_mode_joint_requires_complete_rows():
     df.loc[1, "age"] = np.nan
     df.loc[2:, "income"] = np.nan
     model = MIMIC(
-        ignore_columns=["id"],
-        regression_columns=["age", "income"],
-        classification_columns=["segment", "outcome"],
+        columns={
+            "ignore": ["id"],
+            "regression": ["age", "income"],
+            "classification": ["segment", "outcome"],
+        },
         encoder=RandomForestPathEncoder(n_estimators=4, embedding_dim=3, random_state=16),
         decoder=NeuralConditionalSampler(
             n_components=2,
@@ -723,9 +818,11 @@ def test_generation_decode_mode_joint_requires_complete_rows():
 def test_mimic_sample_with_neural_joint_decode_mode():
     df = make_frame(n=42)
     model = MIMIC(
-        ignore_columns=["id"],
-        regression_columns=["age", "income"],
-        classification_columns=["segment", "outcome"],
+        columns={
+            "ignore": ["id"],
+            "regression": ["age", "income"],
+            "classification": ["segment", "outcome"],
+        },
         encoder=RandomForestPathEncoder(n_estimators=4, embedding_dim=3, random_state=17),
         decoder=NeuralConditionalSampler(
             n_components=2,
@@ -755,9 +852,11 @@ def test_mimic_sample_with_neural_joint_decode_mode():
 def test_mimic_sample_with_neural_conditional_sampler_has_mdn_cell_trace():
     df = make_frame(n=42)
     model = MIMIC(
-        ignore_columns=["id"],
-        regression_columns=["age", "income"],
-        classification_columns=["segment", "outcome"],
+        columns={
+            "ignore": ["id"],
+            "regression": ["age", "income"],
+            "classification": ["segment", "outcome"],
+        },
         encoder=RandomForestPathEncoder(n_estimators=4, embedding_dim=3, random_state=8),
         decoder=NeuralConditionalSampler(
             n_components=2,
@@ -790,9 +889,11 @@ def test_classification_probability_alignment_when_bootstrap_misses_class():
     df["rare"] = "common"
     df.loc[0, "rare"] = "rare"
     model = MIMIC(
-        ignore_columns=["id"],
-        regression_columns=["age", "income"],
-        classification_columns=["segment", "outcome", "rare"],
+        columns={
+            "ignore": ["id"],
+            "regression": ["age", "income"],
+            "classification": ["segment", "outcome", "rare"],
+        },
         encoder=RandomForestPathEncoder(n_estimators=4, embedding_dim=3, random_state=3),
         decoder=MixedFeatureDecoder.random_forest(n_estimators=4, random_state=3),
         n_bootstrap=1,
@@ -809,9 +910,11 @@ def test_missing_target_excluded_but_missing_context_allowed():
     df.loc[0, "age"] = np.nan
     df.loc[1, "income"] = np.nan
     model = MIMIC(
-        ignore_columns=["id"],
-        regression_columns=["age", "income"],
-        classification_columns=["segment", "outcome"],
+        columns={
+            "ignore": ["id"],
+            "regression": ["age", "income"],
+            "classification": ["segment", "outcome"],
+        },
         encoder=RandomForestPathEncoder(n_estimators=4, embedding_dim=3, random_state=1),
         decoder=MixedFeatureDecoder.random_forest(n_estimators=4, random_state=1),
         n_bootstrap=1,

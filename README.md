@@ -36,9 +36,11 @@ task-specific pipelines.
 from mimic import MIMIC
 
 model = MIMIC(
-    regression_columns=["age", "income"],
-    classification_columns=["segment"],
-    ignore_columns=["id"],
+    columns={
+        "ignore": ["id"],
+        "regression": ["age", "income"],
+        "classification": ["segment"],
+    },
     random_state=0,
 )
 

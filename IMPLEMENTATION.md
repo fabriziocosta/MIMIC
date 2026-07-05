@@ -28,9 +28,7 @@ The implementation should follow scikit-learn conventions: constructor arguments
 
 ```python
 MIMIC(
-    ignore_columns=None,
-    regression_columns=None,
-    classification_columns=None,
+    columns=None,
     encoder=None,
     decoder=None,
     policy=None,
@@ -43,13 +41,15 @@ MIMIC(
 )
 ```
 
-The column sets have explicit meanings:
+The `columns` role dictionary has explicit meanings:
 
-* `ignore_columns`: columns excluded from modelling, for example IDs, timestamps used only as row identifiers, or free-text fields not yet supported;
-* `regression_columns`: continuous columns decoded by regressors;
-* `classification_columns`: categorical columns decoded by classifiers.
+* `columns["ignore"]`: columns excluded from modelling, for example IDs, timestamps used only as row identifiers, or free-text fields not yet supported;
+* `columns["regression"]`: continuous columns decoded by regressors;
+* `columns["classification"]`: categorical columns decoded by classifiers.
 
-Every modelled column must belong to exactly one of `regression_columns` or `classification_columns`. Columns in `ignore_columns` are copied through when possible but are not used for fitting encoders, decoders, neighbours, confidence, or sample generation.
+Missing role keys default to empty lists. If `columns` is omitted, numeric columns are inferred as regression columns and non-numeric columns as classification columns.
+
+Every modelled column must belong to exactly one of `columns["regression"]` or `columns["classification"]`. Columns in `columns["ignore"]` are copied through when possible but are not used for fitting encoders, decoders, neighbours, confidence, or sample generation.
 
 Feature-wise embedding dimensionality is specified by the encoder. Encoders with naturally fixed-width outputs, such as `ResNetEncoder`, should expose an `embedding_dim` parameter. Encoders with naturally sparse outputs, such as random-forest path encodings, should expose the native sparse dimensionality by default and may optionally use encoder-level SVD reduction to produce a fixed dense representation.
 
@@ -117,9 +117,11 @@ Examples:
 
 ```python
 MIMIC(
-    regression_columns=["age", "income"],
-    classification_columns=["diagnosis", "outcome"],
-    ignore_columns=["patient_id"],
+    columns={
+        "ignore": ["patient_id"],
+        "regression": ["age", "income"],
+        "classification": ["diagnosis", "outcome"],
+    },
     encoder=RandomForestPathEncoder(n_estimators=200, embedding="path"),
     decoder=MixedFeatureDecoder(
         regression_estimator=RandomForestRegressor(n_estimators=200),
@@ -584,7 +586,7 @@ The original-data panel must use a numeric representation before MDS. A pragmati
 * scale numeric columns, for example with `StandardScaler`;
 * one-hot encode categorical columns, for example with `OneHotEncoder(handle_unknown="ignore")`;
 * apply simple missing-value handling plus missingness indicators where needed;
-* exclude `ignore_columns`.
+* exclude `columns["ignore"]`.
 
 The embedding panel should use the concatenated MIMIC embedding:
 
