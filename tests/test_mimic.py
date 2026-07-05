@@ -323,19 +323,43 @@ def test_columns_dict_role_parsing_and_missing_keys():
     assert model.model_columns_ == ["x"]
 
 
-def test_columns_none_infers_numeric_and_classification_roles():
+def test_columns_auto_infers_ignore_regression_and_classification_roles():
+    n = 20
     df = pd.DataFrame(
         {
-            "x": [1.0, 2.0, 3.0, 4.0],
+            "id": np.arange(100, 100 + n),
+            "row_code": [f"r{i}" for i in range(n)],
+            "x": np.repeat(np.linspace(1.25, 5.75, 5), 4),
+            "flag": [0, 1] * 10,
+            "rating": [1, 2, 3, 4] * 5,
+            "label": ["a", "b"] * 10,
+        }
+    )
+
+    model = MIMIC(columns="auto", mode="identity").fit(df)
+
+    assert model.ignore_columns_ == ["id", "row_code"]
+    assert model.regression_columns_ == ["x"]
+    assert model.classification_columns_ == ["flag", "rating", "label"]
+
+
+def test_columns_none_is_auto_alias():
+    df = pd.DataFrame(
+        {
+            "id": [101, 102, 103, 104],
+            "x": [1.0, 2.1, 3.2, 4.3],
+            "flag": [0, 1, 0, 1],
             "label": ["a", "b", "a", "b"],
         }
     )
 
+    auto = MIMIC(columns="auto", mode="identity").fit(df)
     model = MIMIC(mode="identity").fit(df)
+    none = MIMIC(columns=None, mode="identity").fit(df)
 
-    assert model.ignore_columns_ == []
-    assert model.regression_columns_ == ["x"]
-    assert model.classification_columns_ == ["label"]
+    assert model.ignore_columns_ == auto.ignore_columns_ == none.ignore_columns_
+    assert model.regression_columns_ == auto.regression_columns_ == none.regression_columns_
+    assert model.classification_columns_ == auto.classification_columns_ == none.classification_columns_
 
 
 def test_columns_dict_validation_errors():
@@ -349,6 +373,9 @@ def test_columns_dict_validation_errors():
 
     with pytest.raises(ValueError, match="columns must only contain"):
         MIMIC(columns={"regression": ["x"], "target": ["label"]}).fit(df)
+
+    with pytest.raises(ValueError, match="columns must be 'auto' or a mapping"):
+        MIMIC(columns="infer").fit(df)
 
     with pytest.raises(ValueError, match="Columns cannot appear in multiple roles"):
         MIMIC(columns={"regression": ["x"], "classification": ["x", "label"], "ignore": ["id"]}).fit(df)

@@ -36,11 +36,7 @@ task-specific pipelines.
 from mimic import MIMIC
 
 model = MIMIC(
-    columns={
-        "ignore": ["id"],
-        "regression": ["age", "income"],
-        "classification": ["segment"],
-    },
+    columns="auto",
     random_state=0,
 )
 
@@ -50,6 +46,8 @@ imputed = model.impute(df)
 confidence = model.confidence(df)
 synthetic = model.sample(100)
 ```
+
+`columns="auto"` infers roles using simple heuristics: ID-like or near-unique columns are ignored, small integer-valued numeric columns are classification, other numeric columns are regression, and non-numeric columns are classification. For production use, pass an explicit role mapping such as `columns={"ignore": [...], "regression": [...], "classification": [...]}`.
 
 `MIMIC` also provides simplified `mode` and `capacity` presets. The default
 `mode="joint", capacity=0.5` uses neural components, `n_bootstrap=3`, and a

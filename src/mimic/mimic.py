@@ -97,7 +97,7 @@ class MIMIC(BaseEstimator, TransformerMixin):
 
     def __init__(
         self,
-        columns=None,
+        columns="auto",
         encoder=None,
         decoder=None,
         policy=None,
@@ -680,14 +680,17 @@ class MIMIC(BaseEstimator, TransformerMixin):
 
     def _validate_schema(self, X: pd.DataFrame):
         self.columns_ = list(X.columns)
-        if self.columns is None:
-            self.ignore_columns_ = []
-            model_cols = [c for c in X.columns if c not in self.ignore_columns_]
-            self.regression_columns_ = [c for c in model_cols if pd.api.types.is_numeric_dtype(X[c])]
-            self.classification_columns_ = [c for c in model_cols if c not in self.regression_columns_]
+        if self.columns is None or self.columns == "auto":
+            (
+                self.ignore_columns_,
+                self.regression_columns_,
+                self.classification_columns_,
+            ) = self._infer_columns(X)
         else:
             if not isinstance(self.columns, dict):
-                raise ValueError("columns must be a mapping with 'ignore', 'regression', and 'classification' lists")
+                raise ValueError(
+                    "columns must be 'auto' or a mapping with 'ignore', 'regression', and 'classification' lists"
+                )
             allowed = {"ignore", "regression", "classification"}
             unknown_keys = set(self.columns) - allowed
             if unknown_keys:
@@ -712,6 +715,53 @@ class MIMIC(BaseEstimator, TransformerMixin):
             raise ValueError(f"Every non-ignored column needs a task: {sorted(unassigned)}")
         if not self.model_columns_:
             raise ValueError("At least one modelled column is required")
+
+    def _infer_columns(self, X: pd.DataFrame):
+        ignore_columns = []
+        regression_columns = []
+        classification_columns = []
+        for column in X.columns:
+            series = X[column]
+            non_null = series.dropna()
+            if self._is_auto_ignore_column(column, non_null):
+                ignore_columns.append(column)
+            elif pd.api.types.is_numeric_dtype(series) and not self._is_small_integer_set(non_null):
+                regression_columns.append(column)
+            else:
+                classification_columns.append(column)
+        return ignore_columns, regression_columns, classification_columns
+
+    def _is_auto_ignore_column(self, column, non_null: pd.Series):
+        if self._is_id_like_name(column):
+            return True
+        n = len(non_null)
+        if n < 2:
+            return False
+        return non_null.nunique(dropna=True) / n >= 0.95
+
+    @staticmethod
+    def _is_id_like_name(column):
+        name = str(column).strip().lower()
+        return (
+            name == "id"
+            or name.endswith("_id")
+            or name.endswith("-id")
+            or name.endswith(" id")
+            or "identifier" in name
+        )
+
+    @staticmethod
+    def _is_small_integer_set(non_null: pd.Series):
+        if len(non_null) == 0:
+            return False
+        values = pd.to_numeric(non_null, errors="coerce")
+        if values.isna().any():
+            return False
+        arr = values.to_numpy(dtype=float)
+        if not np.all(np.isclose(arr, np.round(arr))):
+            return False
+        unique_count = len(pd.unique(arr))
+        return 2 <= unique_count <= 10
 
     def _new_context_preprocessor(self, context_columns):
         numeric = [c for c in context_columns if c in self.regression_columns_]

@@ -28,7 +28,7 @@ The implementation should follow scikit-learn conventions: constructor arguments
 
 ```python
 MIMIC(
-    columns=None,
+    columns="auto",
     encoder=None,
     decoder=None,
     policy=None,
@@ -47,19 +47,19 @@ The `columns` role dictionary has explicit meanings:
 * `columns["regression"]`: continuous columns decoded by regressors;
 * `columns["classification"]`: categorical columns decoded by classifiers.
 
-Missing role keys default to empty lists. If `columns` is omitted, numeric columns are inferred as regression columns and non-numeric columns as classification columns.
+Missing role keys default to empty lists. If `columns="auto"` or `columns=None`, MIMIC infers roles with heuristics:
+
+* ignore columns with ID-like names (`id`, names ending in `_id`, `-id`, or ` id`, or names containing `identifier`);
+* ignore columns where at least 95% of non-null values are unique;
+* infer numeric integer-like columns with 2-10 distinct values as classification;
+* infer other numeric columns as regression;
+* infer non-numeric columns as classification.
 
 Every modelled column must belong to exactly one of `columns["regression"]` or `columns["classification"]`. Columns in `columns["ignore"]` are copied through when possible but are not used for fitting encoders, decoders, neighbours, confidence, or sample generation.
 
 Feature-wise embedding dimensionality is specified by the encoder. Encoders with naturally fixed-width outputs, such as `ResNetEncoder`, should expose an `embedding_dim` parameter. Encoders with naturally sparse outputs, such as random-forest path encodings, should expose the native sparse dimensionality by default and may optionally use encoder-level SVD reduction to produce a fixed dense representation.
 
-If column types are omitted, the initial implementation may infer a conservative default:
-
-* numeric columns are treated as regression columns;
-* non-numeric columns are treated as classification columns;
-* no columns are ignored unless specified.
-
-In production code, explicit column declarations should be preferred.
+Auto inference is intended as a convenience. In production code, explicit column declarations should be preferred.
 
 `mode` is a simplified preset API. `mode="joint", capacity=0.5` is the default and
 uses neural components, `n_bootstrap=3`, and:
