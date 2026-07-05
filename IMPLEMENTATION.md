@@ -18,7 +18,7 @@ It should support:
 * `impute(X, columns=None, return_confidence=False)`: fill missing values, including target columns treated as ordinary missing columns;
 * `sample(n_samples, condition=None, return_trace=False)`: generate synthetic rows in embedding space and decode them;
 * `confidence(X, columns=None)`: return uncertainty and bias-variance-style diagnostics for entries;
-* `plot(X=None, color_by=None, center=None, random_state=None, ax=None)`: plot two classical-MDS views, one from the preprocessed original data and one from MIMIC embeddings.
+* `plot(X=None, embedding_columns=None, color_by=None, center=None, random_state=None, ax=None)`: plot two classical-MDS views, one from the preprocessed original data and one from MIMIC embeddings, optionally restricted to selected feature embedding blocks.
 
 The implementation should follow scikit-learn conventions: constructor arguments should be stored without side effects, learned attributes should end with `_`, and fitted state should be checked before inference.
 
@@ -592,7 +592,7 @@ When `return_trace=True`, the trace contains both `trace_type="embedding"` rows 
 
 ## 9. Plotting
 
-`plot(X=None, color_by=None, center=None, random_state=None, ax=None)` should provide a diagnostic visualization of the learned representation.
+`plot(X=None, embedding_columns=None, color_by=None, center=None, random_state=None, ax=None)` should provide a diagnostic visualization of the learned representation.
 
 The method should produce two side-by-side plots:
 
@@ -606,11 +606,13 @@ The original-data panel must use a numeric representation before MDS. A pragmati
 * apply simple missing-value handling plus missingness indicators where needed;
 * exclude `columns["ignore"]`.
 
-The embedding panel should use the concatenated MIMIC embedding:
+The embedding panel should use the concatenated MIMIC embedding by default:
 
 $$
 H(X) = [h_1, h_2, ..., h_p]
 $$
+
+If `embedding_columns` is provided, it should be a column name or list of fitted modelled column names. The embedding panel should then use only those columns' embedding slices, preserving the slice order requested by the caller. Unknown names should raise a clear `ValueError`.
 
 Both panels should use classical MDS from a distance matrix. The default distance is Euclidean distance on the numeric matrix used for that panel.
 
@@ -623,12 +625,12 @@ The `center` argument controls how the data are centred before MDS:
 
 Centres are useful because high-dimensional projections can produce fish-eye effects. Allowing a specific instance as the centre lets the user inspect local geometry around a row of interest instead of always centring on the global mean.
 
-`color_by` may name any column in the input dataframe. If provided, both panels should use the same colour mapping. Numeric colour columns should use a continuous scale. Classification columns should use discrete colours. Missing colour values should use a distinct fallback colour.
+`color_by` may name any column in the input dataframe. If provided, both panels should use the raw dataframe values from that column rather than embedding coordinates. Numeric colour columns should use a continuous scale. Classification columns should use discrete colours. Missing colour values should use a distinct fallback colour.
 
 The method should return matplotlib objects rather than only displaying the plot:
 
 ```python
-fig, axes = mimic.plot(X, color_by="outcome", center="random")
+fig, axes = mimic.plot(X, embedding_columns=["age", "income"], color_by="outcome", center="random")
 ```
 
 If `X` is omitted, `plot` should use the fitted training data when available. If `ax` is supplied, it should accept either two axes or a container from which two axes can be derived.

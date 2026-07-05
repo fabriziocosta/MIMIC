@@ -204,6 +204,7 @@ class MIMIC(BaseEstimator, TransformerMixin):
         n_bootstrap: int | None = None,
         random_state: int | None = None,
         n_jobs: int | None = None,
+        verbose: bool = False,
     ):
         self.columns = columns
         self.encoder = encoder
@@ -216,11 +217,15 @@ class MIMIC(BaseEstimator, TransformerMixin):
         self.n_bootstrap = n_bootstrap
         self.random_state = random_state
         self.n_jobs = n_jobs
+        self.verbose = verbose
+        if self.verbose:
+            self._verbose_init()
 
     def fit(self, X, y=None):
         X = self._as_dataframe(X).copy()
         self._validate_schema(X)
         self._resolve_mode_configuration()
+        self._verbose_fit_configuration()
         rng = np.random.default_rng(self.random_state)
         self.train_X_ = X.copy()
         self.train_index_ = X.index.copy()
@@ -323,6 +328,7 @@ class MIMIC(BaseEstimator, TransformerMixin):
         self.policy_ = self._new_policy()
         self.policy_.validate()
         self.neighbour_index_ = self._fit_neighbours(self.train_embeddings_)
+        self._verbose_fit_summary()
         return self
 
     def transform(self, X):
@@ -477,13 +483,13 @@ class MIMIC(BaseEstimator, TransformerMixin):
             return X_new, pd.DataFrame(traces)
         return X_new
 
-    def plot(self, X=None, color_by=None, center=None, random_state=None, ax=None):
+    def plot(self, X=None, embedding_columns=None, color_by=None, center=None, random_state=None, ax=None):
         check_is_fitted(self, "feature_modules_")
         import matplotlib.pyplot as plt
 
         X = self.train_X_ if X is None else self._as_dataframe(X)
         original = self._plot_original_matrix(X)
-        embedding = self.transform(X)
+        embedding = self._select_embedding_columns(self.transform(X), embedding_columns)
         orig_xy = self._classical_mds(original, center=center, random_state=random_state)
         emb_xy = self._classical_mds(embedding, center=center, random_state=random_state)
 
@@ -516,6 +522,25 @@ class MIMIC(BaseEstimator, TransformerMixin):
             axis.set_ylabel("MDS 2")
         fig.tight_layout()
         return fig, axes[:2]
+
+    def _select_embedding_columns(self, embedding, embedding_columns):
+        if embedding_columns is None:
+            return embedding
+        if isinstance(embedding_columns, str):
+            embedding_columns = [embedding_columns]
+        selected = list(embedding_columns)
+        unknown = set(selected) - set(self.embedding_slices_)
+        if unknown:
+            raise ValueError(f"Unknown embedding columns: {sorted(unknown)}")
+        if not selected:
+            raise ValueError("embedding_columns must contain at least one column")
+        indices = np.concatenate(
+            [
+                np.arange(self.embedding_slices_[column].start, self.embedding_slices_[column].stop)
+                for column in selected
+            ]
+        )
+        return embedding[:, indices]
 
     def _predict_column(self, X: pd.DataFrame, column: str):
         module = self.feature_modules_[column]

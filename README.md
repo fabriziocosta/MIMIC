@@ -62,6 +62,13 @@ synthetic = model.sample(100)
 
 `columns="auto"` infers roles using simple heuristics: ID-like or near-unique columns are ignored, small integer-valued numeric columns are classification, other numeric columns are regression, and non-numeric columns are classification. For production use, pass an explicit role mapping such as `columns={"ignore": [...], "regression": [...], "classification": [...]}`.
 
+Embedding plots can focus on selected feature embeddings while colouring by raw
+dataframe values:
+
+```python
+fig, axes = model.plot(df, embedding_columns=["age", "income"], color_by="segment")
+```
+
 `MIMIC` also provides simplified `mode` and `capacity` presets. The default
 `mode="joint", capacity=0.5` uses neural components, `n_bootstrap=3`, and a
 mutual-neighbour displacement generation policy:

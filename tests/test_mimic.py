@@ -360,6 +360,30 @@ def test_mimic_fit_transform_impute_confidence_sample_plot():
     fig.canvas.draw()
 
 
+def test_plot_can_select_embedding_columns_and_color_from_values():
+    df = make_frame(n=45)
+    model = MIMIC(
+        columns={
+            "ignore": ["id"],
+            "regression": ["age", "income"],
+            "classification": ["segment", "outcome"],
+        },
+        encoder=RandomForestPathEncoder(n_estimators=4, embedding_dim=3, random_state=19),
+        decoder=MixedFeatureDecoder.random_forest(n_estimators=4, random_state=19),
+        n_bootstrap=1,
+        random_state=19,
+    ).fit(df)
+
+    fig, axes = model.plot(df, embedding_columns=["age", "segment"], color_by="income")
+    fig.canvas.draw()
+
+    assert len(axes) == 2
+    assert len(fig.axes) == 4
+
+    with pytest.raises(ValueError, match="Unknown embedding columns"):
+        model.plot(df, embedding_columns=["not_a_column"])
+
+
 def test_sample_function_fits_and_generates_matching_dataframe():
     df = pd.DataFrame(
         {
