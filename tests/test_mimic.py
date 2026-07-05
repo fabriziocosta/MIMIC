@@ -410,6 +410,46 @@ def test_sample_function_fits_and_generates_matching_dataframe():
     assert alias_synthetic.shape == (5, df.shape[1])
 
 
+def test_verbose_false_is_silent_by_default(capsys):
+    df = pd.DataFrame(
+        {
+            "x": [1.0, 1.0, 2.0, 2.0],
+            "label": ["a", "b", "a", "b"],
+        }
+    )
+
+    MIMIC(mode="identity", random_state=0).fit(df)
+
+    assert capsys.readouterr().out == ""
+
+
+def test_verbose_prints_hyperparameters_and_fitted_sizes(capsys):
+    df = pd.DataFrame(
+        {
+            "x": [1.0, 1.0, 2.0, 2.0],
+            "label": ["a", "b", "a", "b"],
+        }
+    )
+
+    model = MIMIC(mode="identity", capacity=0.25, random_state=0, verbose=True)
+    init_out = capsys.readouterr().out
+    model.fit(df)
+    fit_out = capsys.readouterr().out
+
+    assert "MIMIC init hyperparameters:" in init_out
+    assert "verbose: True" in init_out
+    assert "mode: identity" in init_out
+    assert "capacity: 0.25" in init_out
+    assert "MIMIC resolved fit configuration:" in fit_out
+    assert "n_bootstrap_:" in fit_out
+    assert "MIMIC fitted data sizes:" in fit_out
+    assert "input_rows: 4" in fit_out
+    assert "model_columns: 2" in fit_out
+    assert "encoded_input_dim:" in fit_out
+    assert "train_embeddings_shape: (4," in fit_out
+    assert "embedding[x]: rows=4" in fit_out
+
+
 def test_columns_dict_role_parsing_and_missing_keys():
     df = pd.DataFrame(
         {

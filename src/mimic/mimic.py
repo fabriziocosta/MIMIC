@@ -1280,6 +1280,47 @@ class MIMIC(BaseEstimator, TransformerMixin):
             return "MixedFeatureDecoder.random_forest"
         return decoder.__class__.__name__
 
+    def _verbose_init(self):
+        print("MIMIC init hyperparameters:")
+        for key, value in self.get_params(deep=False).items():
+            print(f"  {key}: {self._verbose_value(value)}")
+
+    def _verbose_fit_configuration(self):
+        if not self.verbose:
+            return
+        print("MIMIC resolved fit configuration:")
+        print(f"  mode_: {self.mode_}")
+        print(f"  level_: {self.level_}")
+        print(f"  capacity_: {self.capacity_}")
+        print(f"  capacity_parameters_: {self.capacity_parameters_}")
+        print(f"  n_bootstrap_: {self.n_bootstrap_}")
+        print(f"  generation_decode_mode_config_: {self.generation_decode_mode_config_}")
+        print(f"  encoder_: {self._verbose_value(self.encoder_)}")
+        print(f"  decoder_: {self._verbose_value(self.decoder_)}")
+        print(f"  policy_config_: {self._verbose_value(self.policy_config_)}")
+
+    def _verbose_fit_summary(self):
+        if not self.verbose:
+            return
+        print("MIMIC fitted data sizes:")
+        print(f"  input_rows: {len(self.train_X_)}")
+        print(f"  input_columns: {len(self.columns_)}")
+        print(f"  ignored_columns: {len(self.ignore_columns_)}")
+        print(f"  regression_columns: {len(self.regression_columns_)}")
+        print(f"  classification_columns: {len(self.classification_columns_)}")
+        print(f"  model_columns: {len(self.model_columns_)}")
+        print(f"  encoded_input_dim: {self.global_preprocessor_.output_dim_}")
+        print(f"  train_embeddings_shape: {self.train_embeddings_.shape}")
+        print(f"  resolved_generation_decode_mode: {self.generation_decode_mode_}")
+        for column, sl in self.embedding_slices_.items():
+            print(f"  embedding[{column}]: rows={self.train_embeddings_.shape[0]}, dim={sl.stop - sl.start}")
+
+    @staticmethod
+    def _verbose_value(value):
+        if value is None or isinstance(value, (str, int, float, bool, tuple, list, dict)):
+            return value
+        return value.__class__.__name__
+
 
 def sample(df: pd.DataFrame, n_samples: int | None = None, **mimic_kwargs) -> pd.DataFrame:
     """Fit a default MIMIC model and return synthetic rows for ``df``.

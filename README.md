@@ -96,6 +96,9 @@ Learning rate is scaled downward in log space as capacity increases.
 Explicit `encoder`, `decoder`, `policy`, `n_bootstrap`, or
 `generation_decode_mode` arguments override the preset where supplied.
 
+Set `verbose=True` to print constructor hyperparameters immediately and fitted
+data/embedding sizes during `fit`.
+
 Synthetic generation can choose how generated embeddings are decoded back to
 rows with `generation_decode_mode`:
 

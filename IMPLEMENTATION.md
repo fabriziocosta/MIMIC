@@ -51,6 +51,7 @@ MIMIC(
     n_bootstrap=None,
     random_state=None,
     n_jobs=None,
+    verbose=False,
 )
 ```
 
@@ -121,6 +122,11 @@ When `encoder` or `decoder` is explicitly supplied, that component is used as
 given and its internal hyperparameters are not changed by `capacity`. When
 `n_bootstrap` is explicitly supplied, it overrides the capacity-derived
 bootstrap count.
+
+`verbose=False` is the default. When `verbose=True`, construction prints the
+raw constructor hyperparameters immediately, and fitting prints the resolved
+mode/capacity configuration plus input, encoded-context, and embedding sizes as
+soon as those fitted values are available.
 
 ### 2.3 Encoder and decoder arguments
 
