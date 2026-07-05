@@ -436,7 +436,7 @@ def test_verbose_prints_hyperparameters_and_fitted_sizes(capsys):
             "regression": ["x"],
             "classification": ["label"],
         },
-        mode="identity",
+        mode="direct",
         capacity=0.25,
         random_state=0,
         verbose=True,
@@ -450,8 +450,12 @@ def test_verbose_prints_hyperparameters_and_fitted_sizes(capsys):
     assert "columns:\n" in init_out
     assert "  regression:\n" in init_out
     assert "    - x\n" in init_out
-    assert "mode: identity" in init_out
+    assert "mode: direct" in init_out
     assert "capacity: 0.25" in init_out
+    assert "encoder: ResNetEncoder" in init_out
+    assert "decoder: NeuralConditionalSampler" in init_out
+    assert "policy: GenerationPolicy" in init_out
+    assert "generation_decode_mode: direct" in init_out
     assert "MIMIC resolved fit configuration:" in fit_out
     assert "capacity_parameters_:\n" in fit_out
     assert "  embedding_dim:" in fit_out

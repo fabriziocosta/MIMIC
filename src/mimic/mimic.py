@@ -967,37 +967,8 @@ class MIMIC(BaseEstimator, TransformerMixin):
         self.capacity_parameters_ = preset_params
 
         self.n_bootstrap_ = preset_params["n_bootstrap"] if self.n_bootstrap is None else self.n_bootstrap
-        self.policy_config_ = self.policy if self.policy is not None else GenerationPolicy(
-            method="displacement",
-            neighbour_mode="mutual",
-            n_neighbors=5,
-            lambda_range=(0.25, 0.75),
-        )
-
-        if mode_name == "identity":
-            preset_encoder = IdentityEncoder()
-            preset_decoder = IdentityDecoder()
-            preset_mode = "direct"
-        elif mode_name == "direct":
-            preset_encoder = self._capacity_resnet_encoder(preset_params)
-            preset_decoder = self._capacity_neural_decoder(preset_params)
-            preset_mode = "direct"
-        elif mode_name == "factorised":
-            preset_encoder = self._capacity_resnet_encoder(preset_params)
-            preset_decoder = self._capacity_neural_decoder(preset_params)
-            preset_mode = "factorised"
-        elif mode_name == "joint":
-            preset_encoder = self._capacity_resnet_encoder(preset_params)
-            preset_decoder = self._capacity_neural_decoder(preset_params)
-            preset_mode = "joint"
-        else:
-            preset_encoder = RandomForestPathEncoder(n_estimators=50, n_jobs=self.n_jobs)
-            preset_decoder = MixedFeatureDecoder.random_forest(
-                n_estimators=50,
-                random_state=self.random_state,
-                n_jobs=self.n_jobs,
-            )
-            preset_mode = "auto"
+        self.policy_config_ = self.policy if self.policy is not None else self._default_generation_policy()
+        preset_encoder, preset_decoder, preset_mode = self._preset_components(mode_name, preset_params)
 
         self.encoder_ = self.encoder if self.encoder is not None else preset_encoder
         self.decoder_ = self.decoder if self.decoder is not None else preset_decoder
@@ -1282,7 +1253,8 @@ class MIMIC(BaseEstimator, TransformerMixin):
 
     def _verbose_init(self):
         print("MIMIC init hyperparameters:")
-        for key, value in self.get_params(deep=False).items():
+        preview = self._verbose_configuration_preview()
+        for key, value in preview.items():
             self._verbose_print_item(key, value)
 
     def _verbose_fit_configuration(self):
@@ -1320,6 +1292,54 @@ class MIMIC(BaseEstimator, TransformerMixin):
         if value is None or isinstance(value, (str, int, float, bool, tuple, list)):
             return value
         return value.__class__.__name__
+
+    def _verbose_configuration_preview(self):
+        params = dict(self.get_params(deep=False))
+        try:
+            mode_name = self._resolve_mode_name()
+            capacity = self._validate_capacity(self.capacity)
+            preset_params = self._capacity_parameters(capacity)
+            preset_encoder, preset_decoder, preset_mode = self._preset_components(mode_name, preset_params)
+            params["mode"] = mode_name
+            params["capacity"] = capacity
+            params["capacity_parameters"] = preset_params
+            params["encoder"] = self.encoder if self.encoder is not None else preset_encoder
+            params["decoder"] = self.decoder if self.decoder is not None else preset_decoder
+            params["policy"] = self.policy if self.policy is not None else self._default_generation_policy()
+            if self.generation_decode_mode == "auto" and mode_name is not None and self.decoder is None:
+                params["generation_decode_mode"] = preset_mode
+            else:
+                params["generation_decode_mode"] = self.generation_decode_mode
+        except ValueError:
+            return params
+        return params
+
+    def _preset_components(self, mode_name, preset_params):
+        if mode_name == "identity":
+            return IdentityEncoder(), IdentityDecoder(), "direct"
+        if mode_name == "direct":
+            return self._capacity_resnet_encoder(preset_params), self._capacity_neural_decoder(preset_params), "direct"
+        if mode_name == "factorised":
+            return self._capacity_resnet_encoder(preset_params), self._capacity_neural_decoder(preset_params), "factorised"
+        if mode_name == "joint":
+            return self._capacity_resnet_encoder(preset_params), self._capacity_neural_decoder(preset_params), "joint"
+        return (
+            RandomForestPathEncoder(n_estimators=50, n_jobs=self.n_jobs),
+            MixedFeatureDecoder.random_forest(
+                n_estimators=50,
+                random_state=self.random_state,
+                n_jobs=self.n_jobs,
+            ),
+            "auto",
+        )
+
+    def _default_generation_policy(self):
+        return GenerationPolicy(
+            method="displacement",
+            neighbour_mode="mutual",
+            n_neighbors=5,
+            lambda_range=(0.25, 0.75),
+        )
 
     @classmethod
     def _verbose_print_item(cls, key, value, indent: int = 2):
