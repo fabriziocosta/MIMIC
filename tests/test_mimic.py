@@ -298,7 +298,7 @@ def test_mimic_fit_transform_impute_confidence_sample_plot():
     fig.canvas.draw()
 
 
-def test_level_zero_uses_identity_components_and_default_generation_policy():
+def test_mode_identity_uses_identity_components_and_default_generation_policy():
     df = pd.DataFrame(
         {
             "x": np.linspace(0.0, 1.0, 12),
@@ -308,7 +308,7 @@ def test_level_zero_uses_identity_components_and_default_generation_policy():
     model = MIMIC(
         regression_columns=["x"],
         classification_columns=["label"],
-        level=0,
+        mode="identity",
         random_state=20,
     ).fit(df)
 
@@ -324,6 +324,33 @@ def test_level_zero_uses_identity_components_and_default_generation_policy():
     assert model.generation_decode_mode_ == "direct"
     assert samples.shape == (3, 2)
     assert trace["resolved_generation_decode_mode"].eq("direct").all()
+
+
+def test_numeric_mode_and_legacy_level_aliases_resolve_to_modes():
+    df = pd.DataFrame(
+        {
+            "x": np.linspace(0.0, 1.0, 12),
+            "label": np.array(["a", "b"] * 6),
+        }
+    )
+
+    numeric = MIMIC(
+        regression_columns=["x"],
+        classification_columns=["label"],
+        mode=0,
+        random_state=24,
+    ).fit(df)
+    legacy = MIMIC(
+        regression_columns=["x"],
+        classification_columns=["label"],
+        level=0,
+        random_state=24,
+    ).fit(df)
+
+    assert numeric.mode_ == "identity"
+    assert numeric.level_ == 0
+    assert legacy.mode_ == "identity"
+    assert legacy.level_ == 0
 
 
 def test_capacity_scales_preset_hyperparameters():
@@ -354,14 +381,14 @@ def test_capacity_scales_preset_hyperparameters():
     assert high["n_bootstrap"] == 5
 
 
-def test_level_two_uses_neural_factorised_decoder_preset():
+def test_mode_factorised_uses_neural_decoder_preset():
     df = make_frame(n=36)
     model = MIMIC(
         ignore_columns=["id"],
         regression_columns=["age", "income"],
         classification_columns=["segment", "outcome"],
         encoder=RandomForestPathEncoder(n_estimators=4, embedding_dim=3, random_state=21),
-        level=2,
+        mode="factorised",
         capacity=0.0,
         n_bootstrap=1,
         random_state=21,
@@ -379,14 +406,14 @@ def test_level_two_uses_neural_factorised_decoder_preset():
     assert not trace[trace["trace_type"] == "cell"].empty
 
 
-def test_level_three_uses_neural_joint_decoder_preset():
+def test_mode_joint_uses_neural_decoder_preset():
     df = make_frame(n=36)
     model = MIMIC(
         ignore_columns=["id"],
         regression_columns=["age", "income"],
         classification_columns=["segment", "outcome"],
         encoder=RandomForestPathEncoder(n_estimators=4, embedding_dim=3, random_state=22),
-        level=3,
+        mode="joint",
         capacity=0.0,
         n_bootstrap=1,
         random_state=22,
@@ -400,7 +427,7 @@ def test_level_three_uses_neural_joint_decoder_preset():
     assert trace["trace_type"].eq("embedding").all()
 
 
-def test_custom_decoder_with_default_level_keeps_auto_decode_resolution():
+def test_custom_decoder_with_default_mode_keeps_auto_decode_resolution():
     df = make_frame(n=35)
     model = MIMIC(
         ignore_columns=["id"],
@@ -412,7 +439,8 @@ def test_custom_decoder_with_default_level_keeps_auto_decode_resolution():
         random_state=23,
     ).fit(df)
 
-    assert model.level == 3
+    assert model.mode == "joint"
+    assert model.mode_ == "joint"
     assert isinstance(model.decoder_, LinearMixedFeatureDecoder)
     assert model.generation_decode_mode_ == "direct"
 
@@ -635,8 +663,11 @@ def test_generation_decode_mode_invalid_error():
     with pytest.raises(ValueError, match="generation_decode_mode must be one of"):
         MIMIC(**base_kwargs, generation_decode_mode="unknown").fit(df)
 
-    with pytest.raises(ValueError, match="level must be one of"):
-        MIMIC(**base_kwargs, level=9).fit(df)
+    with pytest.raises(ValueError, match="mode must be one of"):
+        MIMIC(**base_kwargs, mode=9).fit(df)
+
+    with pytest.raises(ValueError, match="mode and level specify different presets"):
+        MIMIC(**base_kwargs, mode="direct", level=0).fit(df)
 
     with pytest.raises(ValueError, match="capacity must be between 0 and 1"):
         MIMIC(**base_kwargs, capacity=1.5).fit(df)

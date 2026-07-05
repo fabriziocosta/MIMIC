@@ -104,7 +104,8 @@ class MIMIC(BaseEstimator, TransformerMixin):
         decoder=None,
         policy=None,
         generation_decode_mode: str = "auto",
-        level: int | None = 3,
+        mode="joint",
+        level=None,
         capacity: float = 0.5,
         n_bootstrap: int | None = None,
         random_state: int | None = None,
@@ -117,6 +118,7 @@ class MIMIC(BaseEstimator, TransformerMixin):
         self.decoder = decoder
         self.policy = policy
         self.generation_decode_mode = generation_decode_mode
+        self.mode = mode
         self.level = level
         self.capacity = capacity
         self.n_bootstrap = n_bootstrap
@@ -126,7 +128,7 @@ class MIMIC(BaseEstimator, TransformerMixin):
     def fit(self, X, y=None):
         X = self._as_dataframe(X).copy()
         self._validate_schema(X)
-        self._resolve_level_configuration()
+        self._resolve_mode_configuration()
         rng = np.random.default_rng(self.random_state)
         self.train_X_ = X.copy()
         self.train_index_ = X.index.copy()
@@ -763,12 +765,12 @@ class MIMIC(BaseEstimator, TransformerMixin):
     def _new_policy(self):
         return deepcopy(self.policy_config_)
 
-    def _resolve_level_configuration(self):
-        valid_levels = {0, 1, 2, 3}
-        if self.level is not None and self.level not in valid_levels:
-            raise ValueError("level must be one of 0, 1, 2, 3, or None")
+    def _resolve_mode_configuration(self):
+        mode_name = self._resolve_mode_name()
         capacity = self._validate_capacity(self.capacity)
         preset_params = self._capacity_parameters(capacity)
+        self.mode_ = mode_name
+        self.level_ = self._mode_to_level(mode_name)
         self.capacity_ = capacity
         self.capacity_parameters_ = preset_params
 
@@ -780,19 +782,19 @@ class MIMIC(BaseEstimator, TransformerMixin):
             lambda_range=(0.25, 0.75),
         )
 
-        if self.level == 0:
+        if mode_name == "identity":
             preset_encoder = IdentityEncoder()
             preset_decoder = IdentityDecoder()
             preset_mode = "direct"
-        elif self.level == 1:
+        elif mode_name == "direct":
             preset_encoder = self._capacity_resnet_encoder(preset_params)
             preset_decoder = self._capacity_neural_decoder(preset_params)
             preset_mode = "direct"
-        elif self.level == 2:
+        elif mode_name == "factorised":
             preset_encoder = self._capacity_resnet_encoder(preset_params)
             preset_decoder = self._capacity_neural_decoder(preset_params)
             preset_mode = "factorised"
-        elif self.level == 3:
+        elif mode_name == "joint":
             preset_encoder = self._capacity_resnet_encoder(preset_params)
             preset_decoder = self._capacity_neural_decoder(preset_params)
             preset_mode = "joint"
@@ -809,8 +811,61 @@ class MIMIC(BaseEstimator, TransformerMixin):
         self.decoder_ = self.decoder if self.decoder is not None else preset_decoder
         use_preset_decoder = self.decoder is None
         self.generation_decode_mode_config_ = self.generation_decode_mode
-        if self.generation_decode_mode == "auto" and self.level is not None and use_preset_decoder:
+        if self.generation_decode_mode == "auto" and mode_name is not None and use_preset_decoder:
             self.generation_decode_mode_config_ = preset_mode
+
+    def _resolve_mode_name(self):
+        mode_name = self._normalize_mode(self.mode, argument_name="mode")
+        level_name = self._normalize_mode(self.level, argument_name="level") if self.level is not None else None
+        if level_name is not None:
+            if mode_name is not None and mode_name != "joint" and mode_name != level_name:
+                raise ValueError("mode and level specify different presets")
+            return level_name
+        return mode_name
+
+    @classmethod
+    def _normalize_mode(cls, value, argument_name: str = "mode"):
+        if value is None:
+            return None
+        numeric_modes = {
+            0: "identity",
+            1: "direct",
+            2: "factorised",
+            3: "joint",
+        }
+        string_modes = {
+            "0": "identity",
+            "1": "direct",
+            "2": "factorised",
+            "3": "joint",
+            "identity": "identity",
+            "direct": "direct",
+            "deterministic": "direct",
+            "factorised": "factorised",
+            "factorized": "factorised",
+            "probabilistic": "factorised",
+            "joint": "joint",
+        }
+        if isinstance(value, (int, np.integer)) and not isinstance(value, bool):
+            if int(value) in numeric_modes:
+                return numeric_modes[int(value)]
+        if isinstance(value, str):
+            key = value.strip().lower().replace("-", "_")
+            key = key.replace("_", "")
+            if key in string_modes:
+                return string_modes[key]
+        raise ValueError(f"{argument_name} must be one of 0, 1, 2, 3, 'identity', 'direct', 'factorised', or 'joint'")
+
+    @staticmethod
+    def _mode_to_level(mode_name):
+        if mode_name is None:
+            return None
+        return {
+            "identity": 0,
+            "direct": 1,
+            "factorised": 2,
+            "joint": 3,
+        }[mode_name]
 
     @staticmethod
     def _validate_capacity(capacity):

@@ -49,8 +49,8 @@ confidence = model.confidence(df)
 synthetic = model.sample(100)
 ```
 
-`MIMIC` also provides simplified `level` and `capacity` presets. The default
-`level=3, capacity=0.5` uses neural components, `n_bootstrap=3`, and a
+`MIMIC` also provides simplified `mode` and `capacity` presets. The default
+`mode="joint", capacity=0.5` uses neural components, `n_bootstrap=3`, and a
 mutual-neighbour displacement generation policy:
 
 ```python
@@ -62,10 +62,10 @@ GenerationPolicy(
 )
 ```
 
-- `level=0`: identity encoder and identity decoder.
-- `level=1`: neural encoder/decoder with deterministic direct decoding.
-- `level=2`: neural encoder/decoder with probabilistic factorised decoding.
-- `level=3`: neural encoder/decoder with deterministic joint decoding.
+- `mode="identity"` or `mode=0`: identity encoder and identity decoder.
+- `mode="direct"` or `mode=1`: neural encoder/decoder with deterministic direct decoding.
+- `mode="factorised"` or `mode=2`: neural encoder/decoder with probabilistic factorised decoding.
+- `mode="joint"` or `mode=3`: neural encoder/decoder with deterministic joint decoding.
 
 `capacity` is a number from `0` to `1` that scales preset hyperparameters:
 embedding dimension, hidden dimension, layer count, epochs, patience, batch

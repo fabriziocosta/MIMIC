@@ -35,7 +35,7 @@ MIMIC(
     decoder=None,
     policy=None,
     generation_decode_mode="auto",
-    level=3,
+    mode="joint",
     capacity=0.5,
     n_bootstrap=None,
     random_state=None,
@@ -61,7 +61,7 @@ If column types are omitted, the initial implementation may infer a conservative
 
 In production code, explicit column declarations should be preferred.
 
-`level` is a simplified preset API. `level=3, capacity=0.5` is the default and
+`mode` is a simplified preset API. `mode="joint", capacity=0.5` is the default and
 uses neural components, `n_bootstrap=3`, and:
 
 ```python
@@ -73,18 +73,18 @@ GenerationPolicy(
 )
 ```
 
-The levels map to generation complexity:
+The modes map to generation behavior and also accept numeric aliases:
 
-* `level=0`: `IdentityEncoder` with `IdentityDecoder`, direct deterministic decoding;
-* `level=1`: `ResNetEncoder` with `NeuralConditionalSampler`, direct deterministic decoding;
-* `level=2`: `ResNetEncoder` with `NeuralConditionalSampler`, factorised probabilistic decoding;
-* `level=3`: `ResNetEncoder` with `NeuralConditionalSampler`, deterministic joint decoding.
+* `mode="identity"` or `mode=0`: `IdentityEncoder` with `IdentityDecoder`, direct deterministic decoding;
+* `mode="direct"` or `mode=1`: `ResNetEncoder` with `NeuralConditionalSampler`, direct deterministic decoding;
+* `mode="factorised"` or `mode=2`: `ResNetEncoder` with `NeuralConditionalSampler`, factorised probabilistic decoding;
+* `mode="joint"` or `mode=3`: `ResNetEncoder` with `NeuralConditionalSampler`, deterministic joint decoding.
 
 Explicit `encoder`, `decoder`, `policy`, `n_bootstrap`, or
 `generation_decode_mode` arguments override the corresponding preset behaviour.
 If a custom decoder is supplied and `generation_decode_mode="auto"`, decode-mode
 resolution follows the decoder capability rather than forcing the default
-`level=3` joint mode.
+`mode="joint"` joint mode. `level` remains accepted as a compatibility alias, but new code should use `mode`.
 
 `capacity` must be between `0` and `1` inclusive. It linearly maps preset
 hyperparameters from minimal to maximal values, except learning rate and weight
