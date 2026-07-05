@@ -24,7 +24,20 @@ The implementation should follow scikit-learn conventions: constructor arguments
 
 ## 2. Public API
 
-### 2.1 Constructor
+### 2.1 One-Shot Generation
+
+```python
+from mimic import sample
+
+synthetic = sample(df)
+```
+
+The module-level `sample(df, n_samples=None, **mimic_kwargs)` helper fits
+`MIMIC(**mimic_kwargs)` internally and returns `model.sample(len(df))` by
+default. It is a convenience API for users who only need a sampled dataframe.
+`sample_dataframe` is an alias with a more explicit name.
+
+### 2.2 Constructor
 
 ```python
 MIMIC(
@@ -109,7 +122,7 @@ given and its internal hyperparameters are not changed by `capacity`. When
 `n_bootstrap` is explicitly supplied, it overrides the capacity-derived
 bootstrap count.
 
-### 2.2 Encoder and decoder arguments
+### 2.3 Encoder and decoder arguments
 
 `encoder` should be a configured encoder object or encoder alias. `decoder` should be a generalized scikit-style estimator that can fit one target-specific model per feature type. It is not a single regressor or classifier. It is a mixed-feature decoder that learns how to map embeddings back to regression and classification columns separately.
 

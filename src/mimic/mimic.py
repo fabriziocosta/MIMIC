@@ -1136,3 +1136,20 @@ class MIMIC(BaseEstimator, TransformerMixin):
         if decoder is None:
             return "MixedFeatureDecoder.random_forest"
         return decoder.__class__.__name__
+
+
+def sample(df: pd.DataFrame, n_samples: int | None = None, **mimic_kwargs) -> pd.DataFrame:
+    """Fit a default MIMIC model and return synthetic rows for ``df``.
+
+    This is the smallest public interface for one-shot generation. By default
+    it returns the same number of rows as the input dataframe. Additional
+    keyword arguments are passed to ``MIMIC`` for callers who need to override
+    defaults such as ``random_state``, ``mode``, ``capacity``, or ``columns``.
+    """
+
+    model = MIMIC(**mimic_kwargs)
+    model.fit(df)
+    return model.sample(len(df) if n_samples is None else n_samples)
+
+
+sample_dataframe = sample

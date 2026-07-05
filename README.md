@@ -33,6 +33,19 @@ task-specific pipelines.
 ## Quick Example
 
 ```python
+from mimic import sample
+
+synthetic = sample(df)
+```
+
+`sample(df)` fits a default `MIMIC` model internally and returns the same number
+of synthetic rows. It is the simplest interface when you only need a sampled
+dataframe.
+
+Use the estimator directly when you want imputation, confidence diagnostics,
+traceability, or reusable fitted state:
+
+```python
 from mimic import MIMIC
 
 model = MIMIC(

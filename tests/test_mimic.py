@@ -18,6 +18,8 @@ from mimic import (
     NeuralConditionalSampler,
     RandomForestPathEncoder,
     ResNetEncoder,
+    sample,
+    sample_dataframe,
 )
 
 
@@ -298,6 +300,32 @@ def test_mimic_fit_transform_impute_confidence_sample_plot():
     fig, axes = model.plot(df_missing, color_by="outcome", center="random")
     assert len(axes) == 2
     fig.canvas.draw()
+
+
+def test_sample_function_fits_and_generates_matching_dataframe():
+    df = pd.DataFrame(
+        {
+            "age": [30.5, 30.5, 42.0, 42.0, 51.5, 51.5, 63.0, 63.0],
+            "segment": ["younger", "younger", "younger", "older", "older", "older", "older", "younger"],
+        }
+    )
+
+    synthetic = sample(
+        df,
+        mode="identity",
+        random_state=0,
+    )
+    alias_synthetic = sample_dataframe(
+        df,
+        n_samples=5,
+        mode="identity",
+        random_state=0,
+    )
+
+    assert isinstance(synthetic, pd.DataFrame)
+    assert synthetic.shape == df.shape
+    assert list(synthetic.columns) == list(df.columns)
+    assert alias_synthetic.shape == (5, df.shape[1])
 
 
 def test_columns_dict_role_parsing_and_missing_keys():
