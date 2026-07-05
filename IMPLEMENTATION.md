@@ -36,6 +36,7 @@ MIMIC(
     policy=None,
     generation_decode_mode="auto",
     level=3,
+    capacity=0.5,
     n_bootstrap=None,
     random_state=None,
     n_jobs=None,
@@ -60,8 +61,8 @@ If column types are omitted, the initial implementation may infer a conservative
 
 In production code, explicit column declarations should be preferred.
 
-`level` is a simplified preset API. `level=3` is the default and uses neural
-components, `n_bootstrap=3`, and:
+`level` is a simplified preset API. `level=3, capacity=0.5` is the default and
+uses neural components, `n_bootstrap=3`, and:
 
 ```python
 GenerationPolicy(
@@ -84,6 +85,29 @@ Explicit `encoder`, `decoder`, `policy`, `n_bootstrap`, or
 If a custom decoder is supplied and `generation_decode_mode="auto"`, decode-mode
 resolution follows the decoder capability rather than forcing the default
 `level=3` joint mode.
+
+`capacity` must be between `0` and `1` inclusive. It linearly maps preset
+hyperparameters from minimal to maximal values, except learning rate and weight
+decay, which use log-space interpolation:
+
+| Parameter | capacity=0 | capacity=1 |
+| --- | ---: | ---: |
+| `embedding_dim` | 1 | 128 |
+| `hidden_dim` | 8 | 128 |
+| `n_layers` | 1 | 8 |
+| `max_epochs` | 10 | 300 |
+| `patience` | 2 | 30 |
+| `batch_size` | 32 | 256 |
+| `n_components` | 1 | 8 |
+| `n_bootstrap` | 1 | 5 |
+| `dropout` | 0.0 | 0.2 |
+| `learning_rate` | 3e-3 | 3e-4 |
+| `weight_decay` | 1e-6 | 1e-3 |
+
+When `encoder` or `decoder` is explicitly supplied, that component is used as
+given and its internal hyperparameters are not changed by `capacity`. When
+`n_bootstrap` is explicitly supplied, it overrides the capacity-derived
+bootstrap count.
 
 ### 2.2 Encoder and decoder arguments
 

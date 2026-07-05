@@ -326,6 +326,34 @@ def test_level_zero_uses_identity_components_and_default_generation_policy():
     assert trace["resolved_generation_decode_mode"].eq("direct").all()
 
 
+def test_capacity_scales_preset_hyperparameters():
+    low = MIMIC._capacity_parameters(0.0)
+    mid = MIMIC._capacity_parameters(0.5)
+    high = MIMIC._capacity_parameters(1.0)
+
+    assert low["embedding_dim"] == 1
+    assert low["hidden_dim"] == 8
+    assert low["n_layers"] == 1
+    assert low["max_epochs"] == 10
+    assert low["patience"] == 2
+    assert low["batch_size"] == 32
+    assert low["n_components"] == 1
+    assert low["n_bootstrap"] == 1
+
+    assert mid["n_bootstrap"] == 3
+    assert low["learning_rate"] > mid["learning_rate"] > high["learning_rate"]
+    assert low["weight_decay"] < mid["weight_decay"] < high["weight_decay"]
+
+    assert high["embedding_dim"] == 128
+    assert high["hidden_dim"] == 128
+    assert high["n_layers"] == 8
+    assert high["max_epochs"] == 300
+    assert high["patience"] == 30
+    assert high["batch_size"] == 256
+    assert high["n_components"] == 8
+    assert high["n_bootstrap"] == 5
+
+
 def test_level_two_uses_neural_factorised_decoder_preset():
     df = make_frame(n=36)
     model = MIMIC(
@@ -334,6 +362,7 @@ def test_level_two_uses_neural_factorised_decoder_preset():
         classification_columns=["segment", "outcome"],
         encoder=RandomForestPathEncoder(n_estimators=4, embedding_dim=3, random_state=21),
         level=2,
+        capacity=0.0,
         n_bootstrap=1,
         random_state=21,
     ).fit(df)
@@ -341,6 +370,9 @@ def test_level_two_uses_neural_factorised_decoder_preset():
     samples, trace = model.sample(3, condition={"segment": "older"}, return_trace=True)
 
     assert isinstance(model.decoder_, NeuralConditionalSampler)
+    assert model.capacity_ == 0.0
+    assert model.decoder_.n_components == 1
+    assert model.decoder_.max_epochs == 10
     assert model.n_bootstrap_ == 1
     assert model.generation_decode_mode_ == "factorised"
     assert samples["segment"].eq("older").all()
@@ -355,6 +387,7 @@ def test_level_three_uses_neural_joint_decoder_preset():
         classification_columns=["segment", "outcome"],
         encoder=RandomForestPathEncoder(n_estimators=4, embedding_dim=3, random_state=22),
         level=3,
+        capacity=0.0,
         n_bootstrap=1,
         random_state=22,
     ).fit(df)
@@ -604,6 +637,9 @@ def test_generation_decode_mode_invalid_error():
 
     with pytest.raises(ValueError, match="level must be one of"):
         MIMIC(**base_kwargs, level=9).fit(df)
+
+    with pytest.raises(ValueError, match="capacity must be between 0 and 1"):
+        MIMIC(**base_kwargs, capacity=1.5).fit(df)
 
 
 def test_generation_decode_mode_joint_requires_neural_decoder():

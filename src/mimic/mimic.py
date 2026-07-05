@@ -105,6 +105,7 @@ class MIMIC(BaseEstimator, TransformerMixin):
         policy=None,
         generation_decode_mode: str = "auto",
         level: int | None = 3,
+        capacity: float = 0.5,
         n_bootstrap: int | None = None,
         random_state: int | None = None,
         n_jobs: int | None = None,
@@ -117,6 +118,7 @@ class MIMIC(BaseEstimator, TransformerMixin):
         self.policy = policy
         self.generation_decode_mode = generation_decode_mode
         self.level = level
+        self.capacity = capacity
         self.n_bootstrap = n_bootstrap
         self.random_state = random_state
         self.n_jobs = n_jobs
@@ -765,8 +767,12 @@ class MIMIC(BaseEstimator, TransformerMixin):
         valid_levels = {0, 1, 2, 3}
         if self.level is not None and self.level not in valid_levels:
             raise ValueError("level must be one of 0, 1, 2, 3, or None")
+        capacity = self._validate_capacity(self.capacity)
+        preset_params = self._capacity_parameters(capacity)
+        self.capacity_ = capacity
+        self.capacity_parameters_ = preset_params
 
-        self.n_bootstrap_ = 3 if self.n_bootstrap is None else self.n_bootstrap
+        self.n_bootstrap_ = preset_params["n_bootstrap"] if self.n_bootstrap is None else self.n_bootstrap
         self.policy_config_ = self.policy if self.policy is not None else GenerationPolicy(
             method="displacement",
             neighbour_mode="mutual",
@@ -779,16 +785,16 @@ class MIMIC(BaseEstimator, TransformerMixin):
             preset_decoder = IdentityDecoder()
             preset_mode = "direct"
         elif self.level == 1:
-            preset_encoder = ResNetEncoder()
-            preset_decoder = NeuralConditionalSampler()
+            preset_encoder = self._capacity_resnet_encoder(preset_params)
+            preset_decoder = self._capacity_neural_decoder(preset_params)
             preset_mode = "direct"
         elif self.level == 2:
-            preset_encoder = ResNetEncoder()
-            preset_decoder = NeuralConditionalSampler()
+            preset_encoder = self._capacity_resnet_encoder(preset_params)
+            preset_decoder = self._capacity_neural_decoder(preset_params)
             preset_mode = "factorised"
         elif self.level == 3:
-            preset_encoder = ResNetEncoder()
-            preset_decoder = NeuralConditionalSampler()
+            preset_encoder = self._capacity_resnet_encoder(preset_params)
+            preset_decoder = self._capacity_neural_decoder(preset_params)
             preset_mode = "joint"
         else:
             preset_encoder = RandomForestPathEncoder(n_estimators=50, n_jobs=self.n_jobs)
@@ -805,6 +811,72 @@ class MIMIC(BaseEstimator, TransformerMixin):
         self.generation_decode_mode_config_ = self.generation_decode_mode
         if self.generation_decode_mode == "auto" and self.level is not None and use_preset_decoder:
             self.generation_decode_mode_config_ = preset_mode
+
+    @staticmethod
+    def _validate_capacity(capacity):
+        try:
+            value = float(capacity)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("capacity must be a number between 0 and 1") from exc
+        if not 0.0 <= value <= 1.0:
+            raise ValueError("capacity must be between 0 and 1")
+        return value
+
+    @classmethod
+    def _capacity_parameters(cls, capacity: float):
+        return {
+            "embedding_dim": cls._scale_int(capacity, 1, 128),
+            "hidden_dim": cls._scale_int(capacity, 8, 128),
+            "n_layers": cls._scale_int(capacity, 1, 8),
+            "max_epochs": cls._scale_int(capacity, 10, 300),
+            "patience": cls._scale_int(capacity, 2, 30),
+            "batch_size": cls._scale_int(capacity, 32, 256),
+            "n_components": cls._scale_int(capacity, 1, 8),
+            "n_bootstrap": cls._scale_int(capacity, 1, 5),
+            "dropout": cls._scale_float(capacity, 0.0, 0.2),
+            "learning_rate": cls._scale_log(capacity, 3e-3, 3e-4),
+            "weight_decay": cls._scale_log(capacity, 1e-6, 1e-3),
+        }
+
+    def _capacity_resnet_encoder(self, params):
+        return ResNetEncoder(
+            embedding_dim=params["embedding_dim"],
+            hidden_dim=params["hidden_dim"],
+            n_layers=params["n_layers"],
+            dropout=params["dropout"],
+            learning_rate=params["learning_rate"],
+            weight_decay=params["weight_decay"],
+            batch_size=params["batch_size"],
+            max_epochs=params["max_epochs"],
+            patience=params["patience"],
+            random_state=self.random_state,
+        )
+
+    def _capacity_neural_decoder(self, params):
+        return NeuralConditionalSampler(
+            n_components=params["n_components"],
+            hidden_dim=params["hidden_dim"],
+            n_layers=params["n_layers"],
+            dropout=params["dropout"],
+            learning_rate=params["learning_rate"],
+            weight_decay=params["weight_decay"],
+            batch_size=params["batch_size"],
+            max_epochs=params["max_epochs"],
+            patience=params["patience"],
+            random_state=self.random_state,
+        )
+
+    @staticmethod
+    def _scale_int(capacity: float, low: int, high: int):
+        return int(round(low + capacity * (high - low)))
+
+    @staticmethod
+    def _scale_float(capacity: float, low: float, high: float):
+        return float(low + capacity * (high - low))
+
+    @staticmethod
+    def _scale_log(capacity: float, low: float, high: float):
+        return float(np.exp(np.log(low) + capacity * (np.log(high) - np.log(low))))
 
     def _resolve_generation_decode_mode(self):
         valid_modes = {"auto", "direct", "factorised", "joint"}

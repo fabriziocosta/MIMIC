@@ -49,9 +49,9 @@ confidence = model.confidence(df)
 synthetic = model.sample(100)
 ```
 
-`MIMIC` also provides a simplified `level` preset. The default `level=3`
-uses neural components, `n_bootstrap=3`, and a mutual-neighbour displacement
-generation policy:
+`MIMIC` also provides simplified `level` and `capacity` presets. The default
+`level=3, capacity=0.5` uses neural components, `n_bootstrap=3`, and a
+mutual-neighbour displacement generation policy:
 
 ```python
 GenerationPolicy(
@@ -66,6 +66,12 @@ GenerationPolicy(
 - `level=1`: neural encoder/decoder with deterministic direct decoding.
 - `level=2`: neural encoder/decoder with probabilistic factorised decoding.
 - `level=3`: neural encoder/decoder with deterministic joint decoding.
+
+`capacity` is a number from `0` to `1` that scales preset hyperparameters:
+embedding dimension, hidden dimension, layer count, epochs, patience, batch
+size, MDN components, bootstrap count, dropout, learning rate, and weight decay.
+`capacity=0` is the smallest useful preset; `capacity=1` is the largest preset.
+Learning rate is scaled downward in log space as capacity increases.
 
 Explicit `encoder`, `decoder`, `policy`, `n_bootstrap`, or
 `generation_decode_mode` arguments override the preset where supplied.
