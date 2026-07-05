@@ -1283,7 +1283,7 @@ class MIMIC(BaseEstimator, TransformerMixin):
     def _verbose_init(self):
         print("MIMIC init hyperparameters:")
         for key, value in self.get_params(deep=False).items():
-            print(f"  {key}: {self._verbose_value(value)}")
+            self._verbose_print_item(key, value)
 
     def _verbose_fit_configuration(self):
         if not self.verbose:
@@ -1292,7 +1292,7 @@ class MIMIC(BaseEstimator, TransformerMixin):
         print(f"  mode_: {self.mode_}")
         print(f"  level_: {self.level_}")
         print(f"  capacity_: {self.capacity_}")
-        print(f"  capacity_parameters_: {self.capacity_parameters_}")
+        self._verbose_print_item("capacity_parameters_", self.capacity_parameters_)
         print(f"  n_bootstrap_: {self.n_bootstrap_}")
         print(f"  generation_decode_mode_config_: {self.generation_decode_mode_config_}")
         print(f"  encoder_: {self._verbose_value(self.encoder_)}")
@@ -1317,9 +1317,25 @@ class MIMIC(BaseEstimator, TransformerMixin):
 
     @staticmethod
     def _verbose_value(value):
-        if value is None or isinstance(value, (str, int, float, bool, tuple, list, dict)):
+        if value is None or isinstance(value, (str, int, float, bool, tuple, list)):
             return value
         return value.__class__.__name__
+
+    @classmethod
+    def _verbose_print_item(cls, key, value, indent: int = 2):
+        prefix = " " * indent
+        if isinstance(value, dict):
+            print(f"{prefix}{key}:")
+            for child_key, child_value in value.items():
+                cls._verbose_print_item(child_key, child_value, indent=indent + 2)
+        elif isinstance(value, list):
+            print(f"{prefix}{key}:")
+            if not value:
+                print(f"{prefix}  []")
+            for item in value:
+                print(f"{prefix}  - {cls._verbose_value(item)}")
+        else:
+            print(f"{prefix}{key}: {cls._verbose_value(value)}")
 
 
 def sample(df: pd.DataFrame, n_samples: int | None = None, **mimic_kwargs) -> pd.DataFrame:
