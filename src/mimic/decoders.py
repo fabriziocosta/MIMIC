@@ -438,6 +438,31 @@ if nn is not None:
             return self.net(x)
 
 
+    class _NeuralJointDecoderNet(nn.Module):
+        def __init__(self, input_dim: int, hidden_dim: int, n_layers: int, dropout: float, target_specs):
+            super().__init__()
+            layers = []
+            width = input_dim
+            for _ in range(max(1, n_layers)):
+                layers.extend(
+                    [
+                        nn.Linear(width, hidden_dim),
+                        nn.ReLU(),
+                        nn.Dropout(dropout),
+                    ]
+                )
+                width = hidden_dim
+            self.trunk = nn.Sequential(*layers)
+            self.heads = nn.ModuleDict()
+            for spec in target_specs:
+                out_dim = 1 if spec["task"] == "regression" else int(spec["n_classes"])
+                self.heads[spec["column"]] = nn.Linear(width, out_dim)
+
+        def forward(self, x):
+            z = self.trunk(x)
+            return {column: head(z) for column, head in self.heads.items()}
+
+
 def mdn_negative_log_likelihood(logits, mu, raw_sigma, y, min_sigma: float = 1e-3, max_sigma: float = 5.0):
     """Return mean negative log likelihood under a Gaussian mixture density head."""
 
@@ -552,6 +577,120 @@ class NeuralConditionalSampler(MixedFeatureDecoder):
             return self._sample_regression(column, H_context, rng, return_trace=return_trace)
         raise ValueError("task must be 'regression' or 'classification'")
 
+    def conditional_evidence_target(self, column: str, task: str, H_context):
+        check_is_fitted(self, "sampler_models_")
+        if column not in self.sampler_models_:
+            raise ValueError(f"No sampler has been fit for target {column!r}")
+        model = self.sampler_models_[column]
+        if task == "regression":
+            logits, mu, sigma = self._predict_mdn_params(model, H_context)
+            probabilities = self._softmax_np(logits / max(float(self.component_temperature), 1e-12))
+            return np.hstack([probabilities, mu, sigma])
+        if task == "classification":
+            return self._predict_class_proba(model, H_context)
+        raise ValueError("task must be 'regression' or 'classification'")
+
+    def fit_joint_decoder(self, evidence, targets, target_specs):
+        self._require_torch()
+        X_arr = self._as_float32_array(evidence)
+        if X_arr.shape[0] < 2:
+            raise ValueError("Joint decoder requires at least two training rows")
+        self.joint_target_specs_ = [dict(spec) for spec in target_specs]
+        target_tensors = {}
+        for spec in self.joint_target_specs_:
+            column = spec["column"]
+            if spec["task"] == "regression":
+                target_tensors[column] = torch.as_tensor(np.asarray(targets[column], dtype=np.float32).reshape(-1), dtype=torch.float32)
+            elif spec["task"] == "classification":
+                target_tensors[column] = torch.as_tensor(np.asarray(targets[column], dtype=np.int64).reshape(-1), dtype=torch.long)
+            else:
+                raise ValueError("task must be 'regression' or 'classification'")
+
+        if self.random_state is not None:
+            torch.manual_seed(int(self.random_state))
+        rng = np.random.default_rng(self.random_state)
+        indices = np.arange(len(X_arr))
+        rng.shuffle(indices)
+        n_val = int(round(len(indices) * self.validation_fraction))
+        if n_val > 0 and len(indices) - n_val >= 2:
+            val_idx = indices[:n_val]
+            train_idx = indices[n_val:]
+        else:
+            val_idx = np.array([], dtype=int)
+            train_idx = indices
+
+        device = self._resolve_device()
+        net = _NeuralJointDecoderNet(
+            input_dim=X_arr.shape[1],
+            hidden_dim=self.hidden_dim,
+            n_layers=self.n_layers,
+            dropout=self.dropout,
+            target_specs=self.joint_target_specs_,
+        ).to(device)
+        optimizer = torch.optim.Adam(net.parameters(), lr=self.learning_rate, weight_decay=self.weight_decay)
+
+        best_loss = float("inf")
+        best_state = None
+        stale_epochs = 0
+        for _epoch in range(self.max_epochs):
+            net.train()
+            shuffled = np.array(train_idx, copy=True)
+            rng.shuffle(shuffled)
+            batch_size = min(self.batch_size, len(shuffled))
+            for start in range(0, len(shuffled), batch_size):
+                batch_idx = shuffled[start : start + batch_size]
+                xb = torch.as_tensor(X_arr[batch_idx], dtype=torch.float32, device=device)
+                yb = {column: tensor[batch_idx].to(device) for column, tensor in target_tensors.items()}
+                optimizer.zero_grad()
+                loss = self._joint_loss(net(xb), yb, self.joint_target_specs_)
+                loss.backward()
+                if self.gradient_clip is not None and self.gradient_clip > 0:
+                    torch.nn.utils.clip_grad_norm_(net.parameters(), self.gradient_clip)
+                optimizer.step()
+
+            eval_idx = val_idx if len(val_idx) else train_idx
+            loss_value = self._eval_joint_loss(net, X_arr[eval_idx], target_tensors, eval_idx, device)
+            if loss_value < best_loss - 1e-8:
+                best_loss = loss_value
+                best_state = {key: value.detach().cpu().clone() for key, value in net.state_dict().items()}
+                stale_epochs = 0
+            else:
+                stale_epochs += 1
+                if stale_epochs >= self.patience:
+                    break
+
+        if best_state is not None:
+            net.load_state_dict(best_state)
+        net.eval()
+        self.joint_decoder_ = {
+            "network": net,
+            "device": device,
+            "target_specs": self.joint_target_specs_,
+        }
+        return self
+
+    def can_predict_joint(self) -> bool:
+        return hasattr(self, "joint_decoder_")
+
+    def predict_joint(self, evidence):
+        check_is_fitted(self, "joint_decoder_")
+        X_arr = self._as_float32_array(evidence)
+        net = self.joint_decoder_["network"]
+        device = self.joint_decoder_["device"]
+        net.eval()
+        with torch.no_grad():
+            xb = torch.as_tensor(X_arr, dtype=torch.float32, device=device)
+            raw = net(xb)
+        predictions = {}
+        for spec in self.joint_decoder_["target_specs"]:
+            column = spec["column"]
+            out = raw[column].detach().cpu().numpy()
+            if spec["task"] == "regression":
+                predictions[column] = out.reshape(-1)
+            else:
+                predictions[column] = np.argmax(out, axis=1).astype(int)
+        return predictions
+
     def _fit_neural_model(self, task: str, X, y):
         X_arr = self._as_float32_array(X)
         if task == "classification":
@@ -641,6 +780,24 @@ class NeuralConditionalSampler(MixedFeatureDecoder):
             xb = torch.as_tensor(X, dtype=torch.float32, device=device)
             yb = y_tensor.to(device)
             loss = self._training_loss(net(xb), yb, task)
+        return float(loss.detach().cpu().item())
+
+    def _joint_loss(self, raw_outputs, targets, target_specs):
+        losses = []
+        for spec in target_specs:
+            column = spec["column"]
+            if spec["task"] == "regression":
+                losses.append(F.mse_loss(raw_outputs[column].reshape(-1), targets[column].float()))
+            else:
+                losses.append(F.cross_entropy(raw_outputs[column], targets[column].long()))
+        return torch.stack(losses).mean()
+
+    def _eval_joint_loss(self, net, X, target_tensors, indices, device) -> float:
+        net.eval()
+        with torch.no_grad():
+            xb = torch.as_tensor(X, dtype=torch.float32, device=device)
+            yb = {column: tensor[indices].to(device) for column, tensor in target_tensors.items()}
+            loss = self._joint_loss(net(xb), yb, self.joint_target_specs_)
         return float(loss.detach().cpu().item())
 
     def _sample_regression(self, column: str, H_context, rng, return_trace: bool):

@@ -49,6 +49,27 @@ confidence = model.confidence(df)
 synthetic = model.sample(100)
 ```
 
+`MIMIC` also provides a simplified `level` preset. The default `level=3`
+uses neural components, `n_bootstrap=3`, and a mutual-neighbour displacement
+generation policy:
+
+```python
+GenerationPolicy(
+    method="displacement",
+    neighbour_mode="mutual",
+    n_neighbors=5,
+    lambda_range=(0.25, 0.75),
+)
+```
+
+- `level=0`: identity encoder and identity decoder.
+- `level=1`: neural encoder/decoder with deterministic direct decoding.
+- `level=2`: neural encoder/decoder with probabilistic factorised decoding.
+- `level=3`: neural encoder/decoder with deterministic joint decoding.
+
+Explicit `encoder`, `decoder`, `policy`, `n_bootstrap`, or
+`generation_decode_mode` arguments override the preset where supplied.
+
 Synthetic generation can choose how generated embeddings are decoded back to
 rows with `generation_decode_mode`:
 
@@ -58,8 +79,9 @@ rows with `generation_decode_mode`:
 - `"direct"` uses feature-wise point predictions from the generated embedding.
 - `"factorised"` samples each non-conditioned feature from a fitted conditional
   sampler such as `ForestConditionalSampler` or `NeuralConditionalSampler`.
-- `"joint"` is reserved for a future joint evidence decoder and currently raises
-  a clear validation error.
+- `"joint"` uses `NeuralConditionalSampler` evidence from all feature-wise
+  conditionals and a deterministic neural row decoder. It must be requested
+  explicitly and trains on complete modelled rows.
 
 ## Installation
 

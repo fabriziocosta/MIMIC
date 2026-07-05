@@ -174,6 +174,62 @@ def test_neural_conditional_sampler_regression_and_classification_trace():
     assert "class_probabilities" in cls_trace[0]
 
 
+def test_neural_conditional_sampler_conditional_evidence_shapes():
+    rng = np.random.default_rng(14)
+    H = rng.normal(size=(36, 3))
+    y_reg = H[:, 0] - H[:, 1]
+    y_cls = np.where(H[:, 2] > 0, 1, 0)
+    sampler = NeuralConditionalSampler(
+        n_components=3,
+        hidden_dim=10,
+        n_layers=1,
+        max_epochs=4,
+        patience=2,
+        batch_size=12,
+        random_state=14,
+        device="cpu",
+    )
+    sampler.fit_sampler_target("x", "regression", H, y_reg)
+    sampler.fit_sampler_target("c", "classification", H, y_cls)
+
+    reg_evidence = sampler.conditional_evidence_target("x", "regression", H[:5])
+    cls_evidence = sampler.conditional_evidence_target("c", "classification", H[:5])
+
+    assert reg_evidence.shape == (5, 9)
+    assert cls_evidence.shape == (5, 2)
+    assert np.allclose(cls_evidence.sum(axis=1), 1.0)
+
+
+def test_neural_conditional_sampler_joint_decoder_predicts_all_targets():
+    rng = np.random.default_rng(15)
+    evidence = rng.normal(size=(40, 7))
+    targets = {
+        "x": evidence[:, 0] - 0.25 * evidence[:, 1],
+        "label": np.where(evidence[:, 2] > 0, 1, 0),
+    }
+    target_specs = [
+        {"column": "x", "task": "regression"},
+        {"column": "label", "task": "classification", "n_classes": 2},
+    ]
+    sampler = NeuralConditionalSampler(
+        hidden_dim=12,
+        n_layers=1,
+        max_epochs=5,
+        patience=2,
+        batch_size=16,
+        random_state=15,
+        device="cpu",
+    )
+
+    sampler.fit_joint_decoder(evidence, targets, target_specs)
+    predictions = sampler.predict_joint(evidence[:6])
+
+    assert set(predictions) == {"x", "label"}
+    assert predictions["x"].shape == (6,)
+    assert predictions["label"].shape == (6,)
+    assert set(predictions["label"]).issubset({0, 1})
+
+
 def test_neural_conditional_sampler_mdn_samples_both_numeric_modes():
     rng = np.random.default_rng(1)
     H = np.zeros((80, 2), dtype=float)
@@ -240,6 +296,92 @@ def test_mimic_fit_transform_impute_confidence_sample_plot():
     fig, axes = model.plot(df_missing, color_by="outcome", center="random")
     assert len(axes) == 2
     fig.canvas.draw()
+
+
+def test_level_zero_uses_identity_components_and_default_generation_policy():
+    df = pd.DataFrame(
+        {
+            "x": np.linspace(0.0, 1.0, 12),
+            "label": np.array(["a", "b"] * 6),
+        }
+    )
+    model = MIMIC(
+        regression_columns=["x"],
+        classification_columns=["label"],
+        level=0,
+        random_state=20,
+    ).fit(df)
+
+    samples, trace = model.sample(3, return_trace=True)
+
+    assert isinstance(model.encoder_, IdentityEncoder)
+    assert isinstance(model.decoder_, IdentityDecoder)
+    assert model.n_bootstrap_ == 3
+    assert model.policy_.method == "displacement"
+    assert model.policy_.neighbour_mode == "mutual"
+    assert model.policy_.n_neighbors == 5
+    assert model.policy_.lambda_range == (0.25, 0.75)
+    assert model.generation_decode_mode_ == "direct"
+    assert samples.shape == (3, 2)
+    assert trace["resolved_generation_decode_mode"].eq("direct").all()
+
+
+def test_level_two_uses_neural_factorised_decoder_preset():
+    df = make_frame(n=36)
+    model = MIMIC(
+        ignore_columns=["id"],
+        regression_columns=["age", "income"],
+        classification_columns=["segment", "outcome"],
+        encoder=RandomForestPathEncoder(n_estimators=4, embedding_dim=3, random_state=21),
+        level=2,
+        n_bootstrap=1,
+        random_state=21,
+    ).fit(df)
+
+    samples, trace = model.sample(3, condition={"segment": "older"}, return_trace=True)
+
+    assert isinstance(model.decoder_, NeuralConditionalSampler)
+    assert model.n_bootstrap_ == 1
+    assert model.generation_decode_mode_ == "factorised"
+    assert samples["segment"].eq("older").all()
+    assert not trace[trace["trace_type"] == "cell"].empty
+
+
+def test_level_three_uses_neural_joint_decoder_preset():
+    df = make_frame(n=36)
+    model = MIMIC(
+        ignore_columns=["id"],
+        regression_columns=["age", "income"],
+        classification_columns=["segment", "outcome"],
+        encoder=RandomForestPathEncoder(n_estimators=4, embedding_dim=3, random_state=22),
+        level=3,
+        n_bootstrap=1,
+        random_state=22,
+    ).fit(df)
+
+    samples, trace = model.sample(3, condition={"segment": "older"}, return_trace=True)
+
+    assert isinstance(model.decoder_, NeuralConditionalSampler)
+    assert model.generation_decode_mode_ == "joint"
+    assert samples["segment"].eq("older").all()
+    assert trace["trace_type"].eq("embedding").all()
+
+
+def test_custom_decoder_with_default_level_keeps_auto_decode_resolution():
+    df = make_frame(n=35)
+    model = MIMIC(
+        ignore_columns=["id"],
+        regression_columns=["age", "income"],
+        classification_columns=["segment", "outcome"],
+        encoder=RandomForestPathEncoder(n_estimators=4, embedding_dim=3, random_state=23),
+        decoder=LinearMixedFeatureDecoder(logistic_max_iter=500),
+        n_bootstrap=1,
+        random_state=23,
+    ).fit(df)
+
+    assert model.level == 3
+    assert isinstance(model.decoder_, LinearMixedFeatureDecoder)
+    assert model.generation_decode_mode_ == "direct"
 
 
 def test_mimic_with_linear_mixed_feature_decoder():
@@ -445,7 +587,7 @@ def test_generation_decode_mode_factorised_requires_sampler_capable_decoder():
         model.fit(df)
 
 
-def test_generation_decode_mode_invalid_and_joint_errors():
+def test_generation_decode_mode_invalid_error():
     df = make_frame(n=35)
     base_kwargs = {
         "ignore_columns": ["id"],
@@ -460,8 +602,87 @@ def test_generation_decode_mode_invalid_and_joint_errors():
     with pytest.raises(ValueError, match="generation_decode_mode must be one of"):
         MIMIC(**base_kwargs, generation_decode_mode="unknown").fit(df)
 
-    with pytest.raises(ValueError, match="joint decoding is not implemented yet"):
-        MIMIC(**base_kwargs, generation_decode_mode="joint").fit(df)
+    with pytest.raises(ValueError, match="level must be one of"):
+        MIMIC(**base_kwargs, level=9).fit(df)
+
+
+def test_generation_decode_mode_joint_requires_neural_decoder():
+    df = make_frame(n=35)
+    base_kwargs = {
+        "ignore_columns": ["id"],
+        "regression_columns": ["age", "income"],
+        "classification_columns": ["segment", "outcome"],
+        "encoder": RandomForestPathEncoder(n_estimators=4, embedding_dim=3, random_state=12),
+        "n_bootstrap": 1,
+        "random_state": 12,
+        "generation_decode_mode": "joint",
+    }
+
+    with pytest.raises(ValueError, match="requires NeuralConditionalSampler-style conditional evidence"):
+        MIMIC(**base_kwargs, decoder=MixedFeatureDecoder.random_forest(n_estimators=4, random_state=12)).fit(df)
+
+    with pytest.raises(ValueError, match="requires NeuralConditionalSampler-style conditional evidence"):
+        MIMIC(**base_kwargs, decoder=ForestConditionalSampler(n_estimators=4, random_state=12)).fit(df)
+
+
+def test_generation_decode_mode_joint_requires_complete_rows():
+    df = make_frame(n=40)
+    df.loc[1, "age"] = np.nan
+    df.loc[2:, "income"] = np.nan
+    model = MIMIC(
+        ignore_columns=["id"],
+        regression_columns=["age", "income"],
+        classification_columns=["segment", "outcome"],
+        encoder=RandomForestPathEncoder(n_estimators=4, embedding_dim=3, random_state=16),
+        decoder=NeuralConditionalSampler(
+            n_components=2,
+            hidden_dim=8,
+            n_layers=1,
+            max_epochs=3,
+            patience=1,
+            batch_size=16,
+            random_state=16,
+            device="cpu",
+        ),
+        generation_decode_mode="joint",
+        n_bootstrap=1,
+        random_state=16,
+    )
+
+    with pytest.raises(ValueError, match="requires at least two complete modelled training rows"):
+        model.fit(df)
+
+
+def test_mimic_sample_with_neural_joint_decode_mode():
+    df = make_frame(n=42)
+    model = MIMIC(
+        ignore_columns=["id"],
+        regression_columns=["age", "income"],
+        classification_columns=["segment", "outcome"],
+        encoder=RandomForestPathEncoder(n_estimators=4, embedding_dim=3, random_state=17),
+        decoder=NeuralConditionalSampler(
+            n_components=2,
+            hidden_dim=10,
+            n_layers=1,
+            max_epochs=4,
+            patience=2,
+            batch_size=16,
+            random_state=17,
+            device="cpu",
+        ),
+        policy=GenerationPolicy(method="displacement", n_neighbors=3),
+        generation_decode_mode="joint",
+        n_bootstrap=1,
+        random_state=17,
+    ).fit(df)
+
+    samples, trace = model.sample(3, condition={"segment": "older"}, return_trace=True)
+
+    assert model.generation_decode_mode_ == "joint"
+    assert samples.shape == (3, 4)
+    assert samples["segment"].eq("older").all()
+    assert trace["trace_type"].eq("embedding").all()
+    assert trace["resolved_generation_decode_mode"].eq("joint").all()
 
 
 def test_mimic_sample_with_neural_conditional_sampler_has_mdn_cell_trace():

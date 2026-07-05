@@ -34,7 +34,9 @@ MIMIC(
     encoder=None,
     decoder=None,
     policy=None,
-    n_bootstrap=2,
+    generation_decode_mode="auto",
+    level=3,
+    n_bootstrap=None,
     random_state=None,
     n_jobs=None,
 )
@@ -57,6 +59,31 @@ If column types are omitted, the initial implementation may infer a conservative
 * no columns are ignored unless specified.
 
 In production code, explicit column declarations should be preferred.
+
+`level` is a simplified preset API. `level=3` is the default and uses neural
+components, `n_bootstrap=3`, and:
+
+```python
+GenerationPolicy(
+    method="displacement",
+    neighbour_mode="mutual",
+    n_neighbors=5,
+    lambda_range=(0.25, 0.75),
+)
+```
+
+The levels map to generation complexity:
+
+* `level=0`: `IdentityEncoder` with `IdentityDecoder`, direct deterministic decoding;
+* `level=1`: `ResNetEncoder` with `NeuralConditionalSampler`, direct deterministic decoding;
+* `level=2`: `ResNetEncoder` with `NeuralConditionalSampler`, factorised probabilistic decoding;
+* `level=3`: `ResNetEncoder` with `NeuralConditionalSampler`, deterministic joint decoding.
+
+Explicit `encoder`, `decoder`, `policy`, `n_bootstrap`, or
+`generation_decode_mode` arguments override the corresponding preset behaviour.
+If a custom decoder is supplied and `generation_decode_mode="auto"`, decode-mode
+resolution follows the decoder capability rather than forcing the default
+`level=3` joint mode.
 
 ### 2.2 Encoder and decoder arguments
 
@@ -377,9 +404,12 @@ The method should:
 resolve to `"direct"`, while fitted conditional samplers resolve to
 `"factorised"`. `"direct"` uses deterministic feature-wise predictions from the
 generated embedding. `"factorised"` uses conditional sampler evidence
-feature-by-feature and is stochastic in the current implementation. `"joint"` is
-reserved for a future row-level evidence decoder and currently raises a clear
-validation error during fitting.
+feature-by-feature and is stochastic in the current implementation. `"joint"`
+requires `NeuralConditionalSampler`: it concatenates deterministic conditional
+evidence for all features and predicts the full row with a fitted neural joint
+decoder. Joint mode trains on complete modelled rows, is deterministic at
+sample time, and must be requested explicitly; `"auto"` does not resolve to
+`"joint"`.
 
 ### 8.1 Generation policy
 

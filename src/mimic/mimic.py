@@ -17,8 +17,8 @@ from sklearn.neighbors import NearestNeighbors
 from sklearn.preprocessing import LabelEncoder, OneHotEncoder, StandardScaler
 from sklearn.utils.validation import check_is_fitted
 
-from .decoders import MixedFeatureDecoder
-from .encoders import RandomForestPathEncoder
+from .decoders import IdentityDecoder, MixedFeatureDecoder, NeuralConditionalSampler
+from .encoders import IdentityEncoder, RandomForestPathEncoder, ResNetEncoder
 from .policies import GenerationPolicy
 
 
@@ -104,7 +104,8 @@ class MIMIC(BaseEstimator, TransformerMixin):
         decoder=None,
         policy=None,
         generation_decode_mode: str = "auto",
-        n_bootstrap: int = 2,
+        level: int | None = 3,
+        n_bootstrap: int | None = None,
         random_state: int | None = None,
         n_jobs: int | None = None,
     ):
@@ -115,6 +116,7 @@ class MIMIC(BaseEstimator, TransformerMixin):
         self.decoder = decoder
         self.policy = policy
         self.generation_decode_mode = generation_decode_mode
+        self.level = level
         self.n_bootstrap = n_bootstrap
         self.random_state = random_state
         self.n_jobs = n_jobs
@@ -122,6 +124,7 @@ class MIMIC(BaseEstimator, TransformerMixin):
     def fit(self, X, y=None):
         X = self._as_dataframe(X).copy()
         self._validate_schema(X)
+        self._resolve_level_configuration()
         rng = np.random.default_rng(self.random_state)
         self.train_X_ = X.copy()
         self.train_index_ = X.index.copy()
@@ -152,7 +155,7 @@ class MIMIC(BaseEstimator, TransformerMixin):
 
             members = []
             oob_errors = []
-            for b in range(self.n_bootstrap):
+            for b in range(self.n_bootstrap_):
                 sample_pos = rng.choice(np.arange(len(observed_indices)), size=len(observed_indices), replace=True)
                 sample_rows = observed_indices[sample_pos]
                 sampled_observed_positions = sample_pos
@@ -207,6 +210,8 @@ class MIMIC(BaseEstimator, TransformerMixin):
         self.train_embeddings_ = self.transform(X)
         self.embedding_slices_ = self._embedding_slices_
         self._fit_conditional_samplers()
+        if self.generation_decode_mode_config_ == "joint":
+            self._fit_joint_decoder()
         self.generation_decode_mode_ = self._resolve_generation_decode_mode()
         self.policy_ = self._new_policy()
         self.policy_.validate()
@@ -341,7 +346,10 @@ class MIMIC(BaseEstimator, TransformerMixin):
             traces.append(trace)
 
         H_new = np.vstack(synth_embeddings)
-        X_new = self._decode_embeddings(H_new)
+        if self.generation_decode_mode_ == "joint":
+            X_new = self._decode_joint_embeddings(H_new)
+        else:
+            X_new = self._decode_embeddings(H_new)
         if condition is not None:
             for column, value in condition.items():
                 if column in X_new.columns:
@@ -512,6 +520,67 @@ class MIMIC(BaseEstimator, TransformerMixin):
                 if hasattr(member.decoder, "fit_sampler_target"):
                     member.decoder.fit_sampler_target(column, module.task, H_context, y, train_indices=train_indices)
 
+    def _fit_joint_decoder(self):
+        complete_mask = self.train_X_[self.model_columns_].notna().all(axis=1).to_numpy()
+        complete_pos = np.flatnonzero(complete_mask)
+        if len(complete_pos) < 2:
+            raise ValueError("generation_decode_mode='joint' requires at least two complete modelled training rows")
+        prototype = self._joint_decoder_prototype()
+        evidence = self._joint_evidence(self.train_embeddings_[complete_pos])
+        targets = {}
+        target_specs = []
+        for column, module in self.feature_modules_.items():
+            values = self.train_X_.iloc[complete_pos][column]
+            if module.task == "regression":
+                targets[column] = module.target_scaler.transform(values.astype(float).to_numpy().reshape(-1, 1)).ravel()
+                target_specs.append({"column": column, "task": "regression"})
+            else:
+                targets[column] = module.label_encoder.transform(values.astype(str))
+                target_specs.append({"column": column, "task": "classification", "n_classes": len(module.classes_)})
+        self.joint_decoder_ = clone(prototype)
+        self.joint_decoder_.fit_joint_decoder(evidence, targets, target_specs)
+
+    def _joint_decoder_prototype(self):
+        prototype = None
+        for module in self.feature_modules_.values():
+            for member in module.members:
+                decoder = member.decoder
+                if prototype is None:
+                    prototype = decoder
+                if not hasattr(decoder, "conditional_evidence_target"):
+                    raise ValueError(
+                        "generation_decode_mode='joint' requires NeuralConditionalSampler-style conditional evidence"
+                    )
+        if prototype is None or not hasattr(prototype, "fit_joint_decoder"):
+            raise ValueError("generation_decode_mode='joint' requires a decoder that can fit a joint row decoder")
+        return prototype
+
+    def _joint_evidence(self, H):
+        blocks = []
+        for column, module in self.feature_modules_.items():
+            H_context = self._without_slice(H, self.embedding_slices_[column])
+            member_evidence = []
+            for member in module.members:
+                if not hasattr(member.decoder, "conditional_evidence_target"):
+                    raise ValueError(
+                        "generation_decode_mode='joint' requires NeuralConditionalSampler-style conditional evidence"
+                    )
+                member_evidence.append(member.decoder.conditional_evidence_target(column, module.task, H_context))
+            blocks.append(np.mean(np.stack(member_evidence, axis=0), axis=0))
+        return np.hstack(blocks)
+
+    def _decode_joint_embeddings(self, H):
+        check_is_fitted(self, "joint_decoder_")
+        predictions = self.joint_decoder_.predict_joint(self._joint_evidence(H))
+        data = {}
+        for column, module in self.feature_modules_.items():
+            pred = predictions[column]
+            if module.task == "regression":
+                data[column] = self._inverse_regression_target(pred, module.target_scaler)
+            else:
+                data[column] = module.label_encoder.inverse_transform(np.asarray(pred, dtype=int))
+        return pd.DataFrame(data)
+
     def _has_stochastic_decoders(self):
         for column, module in self.feature_modules_.items():
             for member in module.members:
@@ -647,7 +716,8 @@ class MIMIC(BaseEstimator, TransformerMixin):
         return ContextPreprocessor(numeric_columns=numeric, categorical_columns=categorical)
 
     def _context_columns_for(self, column: str):
-        if getattr(self.encoder, "include_target_context", False):
+        encoder = getattr(self, "encoder_", self.encoder)
+        if getattr(encoder, "include_target_context", False):
             return list(self.model_columns_)
         return [c for c in self.model_columns_ if c != column]
 
@@ -671,7 +741,7 @@ class MIMIC(BaseEstimator, TransformerMixin):
         return X
 
     def _new_encoder(self, task: str, bootstrap_index: int):
-        encoder = self.encoder if self.encoder is not None else RandomForestPathEncoder(n_estimators=50, n_jobs=self.n_jobs)
+        encoder = self.encoder_
         encoder = clone(encoder)
         params = encoder.get_params()
         updates = {}
@@ -686,25 +756,65 @@ class MIMIC(BaseEstimator, TransformerMixin):
         return encoder
 
     def _new_decoder(self):
-        if self.decoder is None:
-            return MixedFeatureDecoder.random_forest(n_estimators=50, random_state=self.random_state, n_jobs=self.n_jobs)
-        return clone(self.decoder)
+        return clone(self.decoder_)
 
     def _new_policy(self):
-        if self.policy is None:
-            return GenerationPolicy()
-        return deepcopy(self.policy)
+        return deepcopy(self.policy_config_)
+
+    def _resolve_level_configuration(self):
+        valid_levels = {0, 1, 2, 3}
+        if self.level is not None and self.level not in valid_levels:
+            raise ValueError("level must be one of 0, 1, 2, 3, or None")
+
+        self.n_bootstrap_ = 3 if self.n_bootstrap is None else self.n_bootstrap
+        self.policy_config_ = self.policy if self.policy is not None else GenerationPolicy(
+            method="displacement",
+            neighbour_mode="mutual",
+            n_neighbors=5,
+            lambda_range=(0.25, 0.75),
+        )
+
+        if self.level == 0:
+            preset_encoder = IdentityEncoder()
+            preset_decoder = IdentityDecoder()
+            preset_mode = "direct"
+        elif self.level == 1:
+            preset_encoder = ResNetEncoder()
+            preset_decoder = NeuralConditionalSampler()
+            preset_mode = "direct"
+        elif self.level == 2:
+            preset_encoder = ResNetEncoder()
+            preset_decoder = NeuralConditionalSampler()
+            preset_mode = "factorised"
+        elif self.level == 3:
+            preset_encoder = ResNetEncoder()
+            preset_decoder = NeuralConditionalSampler()
+            preset_mode = "joint"
+        else:
+            preset_encoder = RandomForestPathEncoder(n_estimators=50, n_jobs=self.n_jobs)
+            preset_decoder = MixedFeatureDecoder.random_forest(
+                n_estimators=50,
+                random_state=self.random_state,
+                n_jobs=self.n_jobs,
+            )
+            preset_mode = "auto"
+
+        self.encoder_ = self.encoder if self.encoder is not None else preset_encoder
+        self.decoder_ = self.decoder if self.decoder is not None else preset_decoder
+        use_preset_decoder = self.decoder is None
+        self.generation_decode_mode_config_ = self.generation_decode_mode
+        if self.generation_decode_mode == "auto" and self.level is not None and use_preset_decoder:
+            self.generation_decode_mode_config_ = preset_mode
 
     def _resolve_generation_decode_mode(self):
         valid_modes = {"auto", "direct", "factorised", "joint"}
-        mode = self.generation_decode_mode
+        mode = self.generation_decode_mode_config_
         if mode not in valid_modes:
             raise ValueError("generation_decode_mode must be one of 'auto', 'direct', 'factorised', or 'joint'")
         if mode == "joint":
-            raise ValueError(
-                "generation_decode_mode='joint' requires conditional evidence and a fitted joint row decoder; "
-                "joint decoding is not implemented yet."
-            )
+            if not hasattr(self, "joint_decoder_") or not self.joint_decoder_.can_predict_joint():
+                raise ValueError("generation_decode_mode='joint' requires a fitted neural joint row decoder")
+            return "joint"
         has_stochastic = self._has_stochastic_decoders()
         if mode == "factorised" and not has_stochastic:
             raise ValueError(
@@ -846,6 +956,7 @@ class MIMIC(BaseEstimator, TransformerMixin):
         return float(observed != prediction)
 
     def _decoder_name(self):
-        if self.decoder is None:
+        decoder = getattr(self, "decoder_", self.decoder)
+        if decoder is None:
             return "MixedFeatureDecoder.random_forest"
-        return self.decoder.__class__.__name__
+        return decoder.__class__.__name__
