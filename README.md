@@ -35,10 +35,10 @@ task-specific pipelines.
 ```python
 from mimic import mimic_data
 
-synthetic = mimic_data(df)
+synthetic = mimic_data(df, mode="factorised", capacity=0.25)
 ```
 
-`mimic_data(df)` fits a default `MIMIC` model internally and returns the same number
+`mimic_data(df, mode="factorised", capacity=0.25)` fits a default `MIMIC` model internally and returns the same number
 of synthetic rows. It is the simplest interface when you only need a sampled
 dataframe.
 
@@ -99,7 +99,7 @@ category_report, category_summary = categorical_feature_report(
 ```
 
 `MIMIC` also provides simplified `mode` and `capacity` presets. The default
-`mode="joint", capacity=0.5` uses neural components, `n_bootstrap=3`, and a
+`mode="factorised", capacity=0.25` uses neural components, factorised probabilistic decoding, `n_bootstrap=2`, and a
 mutual-neighbour displacement generation policy:
 
 ```python

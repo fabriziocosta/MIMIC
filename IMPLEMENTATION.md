@@ -29,10 +29,10 @@ The implementation should follow scikit-learn conventions: constructor arguments
 ```python
 from mimic import mimic_data
 
-synthetic = mimic_data(df)
+synthetic = mimic_data(df, mode="factorised", capacity=0.25)
 ```
 
-The module-level `mimic_data(df, n_samples=None, **mimic_kwargs)` helper fits
+The module-level `mimic_data(df, n_samples=None, mode="factorised", capacity=0.25, **mimic_kwargs)` helper fits
 `MIMIC(**mimic_kwargs)` internally and returns `model.sample(len(df))` by
 default. It is a convenience API for users who only need a sampled dataframe.
 `sample` and `sample_dataframe` remain compatibility aliases.
@@ -56,8 +56,8 @@ MIMIC(
     decoder=None,
     policy=None,
     generation_decode_mode="auto",
-    mode="joint",
-    capacity=0.5,
+    mode="factorised",
+    capacity=0.25,
     n_bootstrap=None,
     random_state=None,
     n_jobs=None,
@@ -85,8 +85,8 @@ Feature-wise embedding dimensionality is specified by the encoder. Encoders with
 
 Auto inference is intended as a convenience. In production code, explicit column declarations should be preferred.
 
-`mode` is a simplified preset API. `mode="joint", capacity=0.5` is the default and
-uses neural components, `n_bootstrap=3`, and:
+`mode` is a simplified preset API. `mode="factorised", capacity=0.25` is the default and
+uses neural components, factorised probabilistic decoding, `n_bootstrap=2`, and:
 
 ```python
 GenerationPolicy(
@@ -108,7 +108,7 @@ Explicit `encoder`, `decoder`, `policy`, `n_bootstrap`, or
 `generation_decode_mode` arguments override the corresponding preset behaviour.
 If a custom decoder is supplied and `generation_decode_mode="auto"`, decode-mode
 resolution follows the decoder capability rather than forcing the default
-`mode="joint"` joint mode. `level` remains accepted as a compatibility alias, but new code should use `mode`.
+`mode="factorised"` mode. `level` remains accepted as a compatibility alias, but new code should use `mode`.
 
 `capacity` must be between `0` and `1` inclusive. It linearly maps preset
 hyperparameters from minimal to maximal values, except learning rate and weight

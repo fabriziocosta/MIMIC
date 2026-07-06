@@ -198,9 +198,9 @@ class MIMIC(BaseEstimator, TransformerMixin):
         decoder=None,
         policy=None,
         generation_decode_mode: str = "auto",
-        mode="joint",
+        mode="factorised",
         level=None,
-        capacity: float = 0.5,
+        capacity: float = 0.25,
         n_bootstrap: int | None = None,
         random_state: int | None = None,
         n_jobs: int | None = None,
@@ -1371,16 +1371,23 @@ class MIMIC(BaseEstimator, TransformerMixin):
         return {}
 
 
-def mimic_data(df: pd.DataFrame, n_samples: int | None = None, **mimic_kwargs) -> pd.DataFrame:
+def mimic_data(
+    df: pd.DataFrame,
+    n_samples: int | None = None,
+    *,
+    mode="factorised",
+    capacity: float = 0.25,
+    **mimic_kwargs,
+) -> pd.DataFrame:
     """Fit a default MIMIC model and return synthetic rows for ``df``.
 
     This is the smallest public interface for one-shot generation. By default
     it returns the same number of rows as the input dataframe. Additional
     keyword arguments are passed to ``MIMIC`` for callers who need to override
-    defaults such as ``random_state``, ``mode``, ``capacity``, or ``columns``.
+    defaults such as ``random_state`` or ``columns``.
     """
 
-    model = MIMIC(**mimic_kwargs)
+    model = MIMIC(mode=mode, capacity=capacity, **mimic_kwargs)
     model.fit(df)
     return model.sample(len(df) if n_samples is None else n_samples)
 

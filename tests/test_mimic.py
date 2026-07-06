@@ -501,18 +501,21 @@ def test_mimic_data_function_fits_and_generates_matching_dataframe():
     synthetic = mimic_data(
         df,
         mode="identity",
+        capacity=0.0,
         random_state=0,
     )
     sample_alias_synthetic = sample(
         df,
         n_samples=6,
         mode="identity",
+        capacity=0.0,
         random_state=0,
     )
     alias_synthetic = sample_dataframe(
         df,
         n_samples=5,
         mode="identity",
+        capacity=0.0,
         random_state=0,
     )
 
@@ -569,6 +572,13 @@ def test_mimic_data_cli_columns_can_be_read_from_json_file(tmp_path):
 def test_mimic_data_cli_default_output_path_preserves_suffix():
     assert _default_output_path(Path("data/adult.csv")) == Path("data/adult_mimic.csv")
     assert _default_output_path(Path("adult.parquet")) == Path("adult_mimic.parquet")
+
+
+def test_default_mode_and_capacity_are_factorised_low_capacity():
+    model = MIMIC()
+
+    assert model.mode == "factorised"
+    assert model.capacity == 0.25
 
 
 def test_verbose_false_is_silent_by_default(capsys):
@@ -879,8 +889,8 @@ def test_custom_decoder_with_default_mode_keeps_auto_decode_resolution():
         random_state=23,
     ).fit(df)
 
-    assert model.mode == "joint"
-    assert model.mode_ == "joint"
+    assert model.mode == "factorised"
+    assert model.mode_ == "factorised"
     assert isinstance(model.decoder_, LinearMixedFeatureDecoder)
     assert model.generation_decode_mode_ == "direct"
 

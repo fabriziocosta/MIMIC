@@ -64,14 +64,14 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--mode",
-        default="joint",
+        default="factorised",
         choices=["identity", "direct", "factorised", "joint", "0", "1", "2", "3"],
         help="MIMIC preset mode. Defaults to %(default)s.",
     )
     parser.add_argument(
         "--capacity",
         type=float,
-        default=0.5,
+        default=0.25,
         help="Model capacity in [0, 1]. Defaults to %(default)s.",
     )
     parser.add_argument(
