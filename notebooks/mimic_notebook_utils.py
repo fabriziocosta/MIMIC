@@ -164,6 +164,38 @@ def identity_generation_plot(
     return summary, samples, trace, fig, ax
 
 
+def plot_binary_classification_curves(diagnostics, *, size: tuple[float, float] = (5.5, 4)):
+    """Plot ROC and precision-recall curves from binary classification diagnostics."""
+
+    metric_values = diagnostics.metrics.set_index("metric")["value"]
+    fig, axes = plt.subplots(1, 2, figsize=(size[0] * 2, size[1]))
+
+    axes[0].plot(diagnostics.roc_curve["fpr"], diagnostics.roc_curve["tpr"], linewidth=2)
+    axes[0].plot([0, 1], [0, 1], linestyle="--", color="black", alpha=0.6)
+    axes[0].set_title("ROC curve")
+    axes[0].set_xlabel("False positive rate")
+    axes[0].set_ylabel("True positive rate")
+    axes[0].text(0.62, 0.08, f"AUC = {metric_values['roc_auc']:.3f}")
+    axes[0].set_xlim(0, 1)
+    axes[0].set_ylim(0, 1)
+    axes[0].grid(alpha=0.25)
+    axes[0].set_aspect("equal", adjustable="box")
+
+    axes[1].plot(diagnostics.pr_curve["recall"], diagnostics.pr_curve["precision"], linewidth=2)
+    axes[1].axhline(diagnostics.positive_rate, linestyle="--", color="black", alpha=0.6)
+    axes[1].set_title("Precision-recall curve")
+    axes[1].set_xlabel("Recall")
+    axes[1].set_ylabel("Precision")
+    axes[1].text(0.58, 0.08, f"AP = {metric_values['average_precision']:.3f}")
+    axes[1].set_xlim(0, 1)
+    axes[1].set_ylim(0, 1)
+    axes[1].grid(alpha=0.25)
+    axes[1].set_aspect("equal", adjustable="box")
+
+    fig.tight_layout()
+    return fig, axes
+
+
 def plot_feature_embedding_grid(
     model,
     df: pd.DataFrame,
@@ -199,6 +231,119 @@ def plot_feature_embedding_grid(
             raise ValueError(f"Unknown embedding column {column!r}")
         sl = model.embedding_slices_[column]
         coords = classical_mds_2d(H[:, sl], random_state=random_state)
+        values = df[column]
+        if pd.api.types.is_numeric_dtype(values):
+            scatter = ax.scatter(
+                coords["mds1"],
+                coords["mds2"],
+                c=pd.to_numeric(values, errors="coerce"),
+                s=point_size,
+                alpha=alpha,
+                cmap="viridis",
+                edgecolor="none",
+            )
+            fig.colorbar(scatter, ax=ax, fraction=0.046, pad=0.02)
+        else:
+            labels = values.astype("object").where(values.notna(), "__missing__")
+            codes, uniques = pd.factorize(labels)
+            cmap = plt.get_cmap("tab20", max(1, len(uniques)))
+            ax.scatter(
+                coords["mds1"],
+                coords["mds2"],
+                c=codes,
+                s=point_size,
+                alpha=alpha,
+                cmap=cmap,
+                vmin=-0.5,
+                vmax=max(0.5, len(uniques) - 0.5),
+                edgecolor="none",
+            )
+            legend_limit = max(0, int(max_legend_labels))
+            legend_labels = labels.value_counts().head(legend_limit).index
+            label_to_code = {label: i for i, label in enumerate(uniques)}
+            handles = [
+                plt.Line2D(
+                    [0],
+                    [0],
+                    marker="o",
+                    linestyle="",
+                    markersize=4,
+                    markerfacecolor=cmap(label_to_code[label]),
+                    markeredgecolor="none",
+                    label=str(label),
+                )
+                for label in legend_labels
+            ]
+            if len(uniques) > len(legend_labels):
+                handles.append(
+                    plt.Line2D(
+                        [0],
+                        [0],
+                        marker="o",
+                        linestyle="",
+                        markersize=4,
+                        markerfacecolor="none",
+                        markeredgecolor="none",
+                        label=f"+{len(uniques) - len(legend_labels)} more",
+                    )
+                )
+            if handles:
+                ax.legend(
+                    handles=handles,
+                    loc="upper center",
+                    bbox_to_anchor=(0.5, -0.015),
+                    ncol=min(2, max(1, len(handles))),
+                    frameon=False,
+                    fontsize="xx-small",
+                    handletextpad=0.2,
+                    columnspacing=0.45,
+                    labelspacing=0.12,
+                    borderaxespad=0.0,
+                )
+        ax.set_title(column, fontsize="medium")
+        ax.set_xticks([])
+        ax.set_yticks([])
+        ax.set_box_aspect(1)
+
+    for ax in flat_axes[len(columns) :]:
+        ax.set_axis_off()
+
+    fig.subplots_adjust(left=0.025, right=0.985, top=0.94, bottom=0.035, wspace=0.16, hspace=0.42)
+    return fig, axes
+
+
+def plot_global_embedding_color_grid(
+    model,
+    df: pd.DataFrame,
+    columns: list[str] | None = None,
+    *,
+    n_cols: int = 4,
+    random_state=None,
+    point_size: int = 12,
+    alpha: float = 0.75,
+    max_legend_labels: int = 6,
+    size: tuple[float, float] = (4, 4),
+):
+    """Plot the full row embedding once per feature, coloured by each raw feature value."""
+
+    columns = list(model.model_columns_ if columns is None else columns)
+    if not columns:
+        raise ValueError("columns must contain at least one feature")
+
+    H = model.transform(df)
+    coords = classical_mds_2d(H, random_state=random_state)
+    n_cols = max(1, int(n_cols))
+    n_rows = int(np.ceil(len(columns) / n_cols))
+    panel_width, panel_height = size
+    fig, axes = plt.subplots(
+        n_rows,
+        n_cols,
+        figsize=(panel_width * n_cols, panel_height * n_rows),
+        squeeze=False,
+    )
+    flat_axes = axes.ravel()
+
+    for ax, column in zip(flat_axes, columns):
         values = df[column]
         if pd.api.types.is_numeric_dtype(values):
             scatter = ax.scatter(
