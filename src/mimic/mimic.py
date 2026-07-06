@@ -4,9 +4,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field, fields, is_dataclass
 from copy import deepcopy
+from datetime import datetime, timezone
+from importlib.metadata import PackageNotFoundError, version
 import json
+from pathlib import Path
+import sys
 import warnings
 
+import joblib
 import numpy as np
 import pandas as pd
 from scipy import sparse
@@ -504,6 +509,44 @@ class MIMIC(BaseEstimator, TransformerMixin):
         if return_trace:
             return X_new, pd.DataFrame(traces)
         return X_new
+
+    def save(self, path):
+        """Persist a fitted MIMIC model to a local joblib artifact."""
+        try:
+            check_is_fitted(self, "train_embeddings_")
+        except Exception as exc:
+            raise ValueError("Cannot save an unfitted MIMIC model") from exc
+
+        output_path = Path(path)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        self.persistence_metadata_ = self._persistence_metadata()
+        joblib.dump(self, output_path)
+        return self
+
+    @classmethod
+    def load(cls, path):
+        """Load a fitted MIMIC model from a local joblib artifact."""
+        model = joblib.load(Path(path))
+        if not isinstance(model, cls):
+            raise ValueError("Loaded artifact is not a MIMIC model")
+        if not hasattr(model, "train_embeddings_"):
+            raise ValueError("Loaded MIMIC model is not fitted")
+        return model
+
+    def _persistence_metadata(self):
+        try:
+            package_version = version("mimic")
+        except PackageNotFoundError:
+            package_version = None
+        return {
+            "package": "mimic",
+            "package_version": package_version,
+            "python_version": sys.version.split()[0],
+            "saved_at": datetime.now(timezone.utc).isoformat(),
+            "model_columns": list(getattr(self, "model_columns_", [])),
+            "resolved_mode": getattr(self, "mode_", None),
+            "resolved_generation_decode_mode": getattr(self, "generation_decode_mode_", None),
+        }
 
     def _sample_embeddings(
         self,
@@ -1740,6 +1783,9 @@ def mimic_data(
     *,
     mode="factorised",
     capacity: float = 0.25,
+    save_model=None,
+    load_model=None,
+    refit: bool = False,
     privacy_filter=None,
     **mimic_kwargs,
 ) -> pd.DataFrame:
@@ -1748,11 +1794,19 @@ def mimic_data(
     This is the smallest public interface for one-shot generation. By default
     it returns the same number of rows as the input dataframe. Additional
     keyword arguments are passed to ``MIMIC`` for callers who need to override
-    defaults such as ``random_state`` or ``columns``.
+    defaults such as ``random_state`` or ``columns``. Pass ``save_model`` to
+    persist a freshly fitted model, or ``load_model`` to sample from a fitted
+    local artifact without retraining. Use ``refit=True`` to fit a fresh model
+    even when ``load_model`` is supplied.
     """
 
-    model = MIMIC(mode=mode, capacity=capacity, **mimic_kwargs)
-    model.fit(df)
+    if load_model is not None and not refit:
+        model = MIMIC.load(load_model)
+    else:
+        model = MIMIC(mode=mode, capacity=capacity, **mimic_kwargs)
+        model.fit(df)
+        if save_model is not None:
+            model.save(save_model)
     return model.sample(len(df) if n_samples is None else n_samples, privacy_filter=privacy_filter)
 
 

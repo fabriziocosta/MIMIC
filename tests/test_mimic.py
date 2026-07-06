@@ -4,6 +4,7 @@ matplotlib.use("Agg")
 
 from pathlib import Path
 
+import joblib
 import numpy as np
 import pandas as pd
 import pytest
@@ -527,6 +528,94 @@ def test_mimic_data_function_fits_and_generates_matching_dataframe():
     assert alias_synthetic.shape == (5, df.shape[1])
 
 
+def test_mimic_model_save_load_roundtrip_supports_core_methods(tmp_path):
+    df = pd.DataFrame(
+        {
+            "age": [30.5, 30.5, 42.0, 42.0, 51.5, 51.5, 63.0, 63.0],
+            "segment": ["younger", "younger", "younger", "older", "older", "older", "older", "younger"],
+        }
+    )
+    model_path = tmp_path / "adult_mimic.joblib"
+    model = MIMIC(mode="identity", random_state=0).fit(df)
+
+    returned = model.save(model_path)
+    loaded = MIMIC.load(model_path)
+    sampled, trace = loaded.sample(3, return_trace=True)
+    transformed = loaded.transform(df)
+    imputed = loaded.impute(df)
+
+    assert returned is model
+    assert model_path.exists()
+    assert loaded.persistence_metadata_["package"] == "mimic"
+    assert loaded.persistence_metadata_["resolved_mode"] == "identity"
+    assert sampled.shape == (3, df.shape[1])
+    assert list(sampled.columns) == list(df.columns)
+    assert transformed.shape[0] == len(df)
+    assert imputed.shape == df.shape
+    assert not trace.empty
+    assert set(trace["trace_type"]) == {"embedding"}
+
+
+def test_mimic_model_save_load_validation(tmp_path):
+    unfitted_path = tmp_path / "unfitted.joblib"
+    not_mimic_path = tmp_path / "not_mimic.joblib"
+    joblib.dump(MIMIC(mode="identity"), unfitted_path)
+    joblib.dump({"not": "mimic"}, not_mimic_path)
+
+    with pytest.raises(ValueError, match="Cannot save an unfitted MIMIC model"):
+        MIMIC(mode="identity").save(tmp_path / "cannot_save.joblib")
+    with pytest.raises(ValueError, match="not fitted"):
+        MIMIC.load(unfitted_path)
+    with pytest.raises(ValueError, match="not a MIMIC model"):
+        MIMIC.load(not_mimic_path)
+
+
+def test_mimic_data_can_save_and_load_model(tmp_path, monkeypatch):
+    df = pd.DataFrame(
+        {
+            "age": [30.5, 30.5, 42.0, 42.0, 51.5, 51.5, 63.0, 63.0],
+            "segment": ["younger", "younger", "younger", "older", "older", "older", "older", "younger"],
+        }
+    )
+    model_path = tmp_path / "adult_mimic.joblib"
+
+    synthetic = mimic_data(df, mode="identity", random_state=0, save_model=model_path)
+    assert model_path.exists()
+    assert synthetic.shape == df.shape
+
+    def fail_fit(self, X, y=None):
+        raise AssertionError("mimic_data should not fit when load_model is used without refit")
+
+    monkeypatch.setattr(MIMIC, "fit", fail_fit)
+    loaded_synthetic = mimic_data(df, n_samples=4, load_model=model_path)
+    assert loaded_synthetic.shape == (4, df.shape[1])
+
+
+def test_mimic_data_load_model_with_refit_saves_fresh_model(tmp_path):
+    df = pd.DataFrame(
+        {
+            "age": [30.5, 30.5, 42.0, 42.0, 51.5, 51.5, 63.0, 63.0],
+            "segment": ["younger", "younger", "younger", "older", "older", "older", "older", "younger"],
+        }
+    )
+    model_path = tmp_path / "adult_mimic.joblib"
+    refit_path = tmp_path / "adult_refit.joblib"
+    mimic_data(df, mode="identity", random_state=0, save_model=model_path)
+
+    synthetic = mimic_data(
+        df,
+        mode="identity",
+        random_state=1,
+        load_model=model_path,
+        refit=True,
+        save_model=refit_path,
+    )
+
+    assert synthetic.shape == df.shape
+    assert refit_path.exists()
+    assert MIMIC.load(refit_path).random_state == 1
+
+
 def test_mimic_data_cli_defaults_to_mimic_suffix_for_csv(tmp_path):
     df = pd.DataFrame(
         {
@@ -555,6 +644,73 @@ def test_mimic_data_cli_defaults_to_mimic_suffix_for_csv(tmp_path):
     assert output_path.exists()
     assert generated.shape == df.shape
     assert list(generated.columns) == list(df.columns)
+
+
+def test_mimic_data_cli_can_save_and_load_model(tmp_path):
+    df = pd.DataFrame(
+        {
+            "age": [30.5, 30.5, 42.0, 42.0, 51.5, 51.5, 63.0, 63.0],
+            "segment": ["younger", "younger", "younger", "older", "older", "older", "older", "younger"],
+        }
+    )
+    input_path = tmp_path / "adult.csv"
+    output_path = tmp_path / "adult_generated.csv"
+    loaded_output_path = tmp_path / "adult_loaded.csv"
+    refit_output_path = tmp_path / "adult_refit.csv"
+    model_path = tmp_path / "adult_mimic.joblib"
+    refit_model_path = tmp_path / "adult_refit.joblib"
+    df.to_csv(input_path, index=False)
+
+    exit_code = mimic_cli_main(
+        [
+            str(input_path),
+            "--columns",
+            '{"regression":["age"],"classification":["segment"]}',
+            "--mode",
+            "identity",
+            "--random-state",
+            "0",
+            "--output",
+            str(output_path),
+            "--save-model",
+            str(model_path),
+        ]
+    )
+    load_exit_code = mimic_cli_main(
+        [
+            str(input_path),
+            "--load-model",
+            str(model_path),
+            "--output",
+            str(loaded_output_path),
+        ]
+    )
+    refit_exit_code = mimic_cli_main(
+        [
+            str(input_path),
+            "--columns",
+            '{"regression":["age"],"classification":["segment"]}',
+            "--mode",
+            "identity",
+            "--load-model",
+            str(model_path),
+            "--refit",
+            "--save-model",
+            str(refit_model_path),
+            "--output",
+            str(refit_output_path),
+        ]
+    )
+
+    assert exit_code == 0
+    assert load_exit_code == 0
+    assert refit_exit_code == 0
+    assert output_path.exists()
+    assert loaded_output_path.exists()
+    assert refit_output_path.exists()
+    assert model_path.exists()
+    assert refit_model_path.exists()
+    assert pd.read_csv(loaded_output_path).shape == df.shape
 
 
 def test_mimic_data_cli_columns_can_be_read_from_json_file(tmp_path):

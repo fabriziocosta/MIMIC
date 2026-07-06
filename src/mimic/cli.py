@@ -22,13 +22,19 @@ def main(argv: list[str] | None = None) -> int:
         df = _read_frame(input_path)
     except ValueError as exc:
         parser.error(str(exc))
-    synthetic = mimic_data(
-        df,
-        columns=columns,
-        mode=args.mode,
-        capacity=args.capacity,
-        random_state=args.random_state,
-    )
+    try:
+        synthetic = mimic_data(
+            df,
+            columns=columns,
+            mode=args.mode,
+            capacity=args.capacity,
+            save_model=args.save_model,
+            load_model=args.load_model,
+            refit=args.refit,
+            random_state=args.random_state,
+        )
+    except (OSError, ValueError) as exc:
+        parser.error(str(exc))
 
     output_path = Path(args.output) if args.output is not None else _default_output_path(input_path)
     try:
@@ -79,6 +85,21 @@ def _build_parser() -> argparse.ArgumentParser:
         type=int,
         default=None,
         help="Optional random seed for reproducible generation.",
+    )
+    parser.add_argument(
+        "--save-model",
+        default=None,
+        help="Optional path where the fitted MIMIC model should be saved.",
+    )
+    parser.add_argument(
+        "--load-model",
+        default=None,
+        help="Optional path to a fitted MIMIC model to load before sampling.",
+    )
+    parser.add_argument(
+        "--refit",
+        action="store_true",
+        help="Fit a fresh model even when --load-model is supplied.",
     )
     return parser
 

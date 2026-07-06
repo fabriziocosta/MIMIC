@@ -52,6 +52,24 @@ privacy guarantee.
 synthetic = mimic_data(df, privacy_filter=True)
 ```
 
+Fitted models can be saved and loaded locally so generation can be repeated
+without retraining:
+
+```python
+synthetic = mimic_data(df, save_model="adult_mimic.joblib")
+more_synthetic = mimic_data(df, load_model="adult_mimic.joblib", n_samples=1000)
+```
+
+The estimator API exposes the same persistence path:
+
+```python
+model = MIMIC(mode="factorised", random_state=0).fit(df)
+model.save("adult_mimic.joblib")
+
+loaded = MIMIC.load("adult_mimic.joblib")
+synthetic = loaded.sample(1000)
+```
+
 The same one-shot workflow is available from the command line:
 
 ```bash
@@ -59,8 +77,9 @@ mimic-data data.csv
 ```
 
 This writes `data_mimic.csv` beside the input file. CSV, Parquet, and Excel
-inputs are supported. Optional flags include `--columns`, `--mode`, and
-`--capacity`; run `mimic-data --help` for details.
+inputs are supported. Optional flags include `--columns`, `--mode`,
+`--capacity`, `--save-model`, and `--load-model`; run `mimic-data --help` for
+details.
 
 Use the estimator directly when you want imputation, confidence diagnostics,
 traceability, or reusable fitted state:
