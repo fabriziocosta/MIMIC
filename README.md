@@ -1,6 +1,7 @@
 # MIMIC
 
-MIMIC is a modular framework for working with mixed tabular data. It treats
+MIMIC stands for **Modular Inference for Missingness, Inconsistency, and
+Creation**. It is a modular framework for working with mixed tabular data. It treats
 imputation, consistency checking, supervised prediction, uncertainty estimation,
 and synthetic data generation as variations of the same problem: predicting one
 feature from the rest of the row.
@@ -120,10 +121,32 @@ GenerationPolicy(
 )
 ```
 
-- `mode="identity"` or `mode=0`: identity encoder and identity decoder.
-- `mode="direct"` or `mode=1`: neural encoder/decoder with deterministic direct decoding.
-- `mode="factorised"` or `mode=2`: neural encoder/decoder with probabilistic factorised decoding.
-- `mode="joint"` or `mode=3`: neural encoder/decoder with deterministic joint decoding.
+### `mode="identity"` / `mode=0`
+
+Uses the identity encoder and identity decoder. Generation operates directly in
+the preprocessed feature space, so this mode is useful as a transparent baseline
+for checking what MIMIC adds beyond SMOTE-style interpolation or displacement.
+
+### `mode="direct"` / `mode=1`
+
+Uses the neural encoder preset and deterministic decoding. Synthetic embeddings
+are decoded directly into feature values without stochastic conditional
+resampling, making outputs easier to reproduce and traces simpler.
+
+### `mode="factorised"` / `mode=2`
+
+Uses the neural encoder preset with probabilistic factorised decoding. After an
+initial deterministic decode, feature values are sampled from feature-wise
+conditional decoders given the rest of the embedding. This is the default mode
+because it keeps generation stochastic while preserving the modular
+feature-wise design.
+
+### `mode="joint"` / `mode=3`
+
+Uses the neural encoder preset with deterministic joint decoding. A shared
+neural row decoder predicts all modelled columns from concatenated conditional
+evidence. This mode must be requested explicitly and currently requires the
+neural conditional sampler.
 
 `capacity` is a number from `0` to `1` that scales preset hyperparameters:
 embedding dimension, hidden dimension, layer count, epochs, patience, batch
