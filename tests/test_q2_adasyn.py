@@ -29,11 +29,12 @@ def test_q2_dataset_registry_contains_plan_keys():
 
 
 def test_q2_config_view_reuses_run_full_artifact_stem():
-    run_full = Q2Config(dataset_key="pima", run_profile="run_full")
+    run_full = Q2Config(dataset_key="pima", run_profile="run_full", mimic_feature_n_jobs=2)
     view = Q2Config(dataset_key="pima", run_profile="view")
 
     assert run_full.should_run_experiment is True
     assert run_full.saves_as_profile == "run_full"
+    assert run_full.mimic_feature_n_jobs == 2
     assert view.should_run_experiment is False
     assert view.saves_as_profile == "run_full"
 

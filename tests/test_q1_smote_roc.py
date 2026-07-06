@@ -6,6 +6,7 @@ from mimic_experiments.q1_smote_roc import (
     _emit_progress,
     _effective_worker_count,
     _load_satimage,
+    fit_mimic_model,
     fold_indices,
     format_seconds,
     generated_count_for_fraction,
@@ -149,17 +150,38 @@ def test_plot_q1_roc_sweep_returns_configured_figure():
 
 
 def test_q1_config_profile_properties():
-    run_full = Q1Config(run_profile="run_full")
+    run_full = Q1Config(run_profile="run_full", mimic_feature_n_jobs=2)
     view = Q1Config(run_profile="view")
 
     assert run_full.n_splits == 10
     assert run_full.n_rows is None
     assert run_full.mimic_capacity == run_full.mimic_capacity_run_full
+    assert run_full.mimic_feature_n_jobs == 2
     assert run_full.saves_as_profile == "run_full"
     assert run_full.should_run_experiment is True
     assert view.n_splits == 10
     assert view.saves_as_profile == "run_full"
     assert view.should_run_experiment is False
+
+
+def test_fit_mimic_model_passes_feature_n_jobs(monkeypatch):
+    calls = []
+
+    class DummyMIMIC:
+        def __init__(self, **kwargs):
+            calls.append(kwargs)
+
+        def fit(self, train):
+            self.train = train
+            return self
+
+    monkeypatch.setattr("mimic_experiments.q1_smote_roc.MIMIC", DummyMIMIC)
+    train = pd.DataFrame({"x": [1.0, 2.0], "label": ["majority", "minority"]})
+    config = Q1Config(mimic_feature_n_jobs=3)
+
+    fit_mimic_model(train, config=config, random_state=0)
+
+    assert calls[0]["feature_n_jobs"] == 3
 
 
 def test_maybe_subsample_is_reproducible():

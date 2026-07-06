@@ -176,6 +176,13 @@ Learning rate is scaled downward in log space as capacity increases.
 Explicit `encoder`, `decoder`, `policy`, `n_bootstrap`, or
 `generation_decode_mode` arguments override the preset where supplied.
 
+Parallelism has two layers. `n_jobs` is passed to compatible underlying
+estimators such as random forests, while `feature_n_jobs` parallelizes MIMIC's
+feature-wise module fitting across target columns. Keep only one outer layer
+high at a time: for example, when cross-validation folds are already parallel,
+leave `feature_n_jobs=1`; when fitting one model at a time, increase
+`feature_n_jobs` to train target features concurrently.
+
 Set `verbose=True` to print constructor hyperparameters immediately and fitted
 data/embedding sizes during `fit`.
 

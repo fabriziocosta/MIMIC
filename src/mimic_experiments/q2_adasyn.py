@@ -53,6 +53,7 @@ class Q2Config:
     mimic_capacity_run_full: float = 0.25
     artifact_dir: str | None = None
     worker_threads: int = 1
+    mimic_feature_n_jobs: int | None = 1
     policy: GenerationPolicy = field(
         default_factory=lambda: GenerationPolicy(
             method="smote",
@@ -232,6 +233,7 @@ def augment_minority_with_mimic(
         capacity=config.mimic_capacity,
         policy=config.policy,
         random_state=random_state,
+        feature_n_jobs=config.mimic_feature_n_jobs,
     )
     model.fit(train)
     synthetic = model.sample(n_generated, condition={"label": "minority"})

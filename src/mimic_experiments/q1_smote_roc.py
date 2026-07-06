@@ -62,6 +62,7 @@ class Q1Config:
     artifact_dir: str | None = None
     cache_models: bool = True
     worker_threads: int = 1
+    mimic_feature_n_jobs: int | None = 1
     policy: GenerationPolicy = field(
         default_factory=lambda: GenerationPolicy(
             method="smote",
@@ -247,6 +248,7 @@ def fit_mimic_model(train: pd.DataFrame, *, config: Q1Config, random_state: int)
         capacity=config.mimic_capacity,
         policy=config.policy,
         random_state=random_state,
+        feature_n_jobs=config.mimic_feature_n_jobs,
     )
     model.fit(train)
     return model

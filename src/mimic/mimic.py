@@ -12,6 +12,7 @@ import sys
 import warnings
 
 import joblib
+from joblib import Parallel, delayed
 import numpy as np
 import pandas as pd
 from scipy import sparse
@@ -221,6 +222,7 @@ class MIMIC(BaseEstimator, TransformerMixin):
         n_bootstrap: int | None = None,
         random_state: int | None = None,
         n_jobs: int | None = None,
+        feature_n_jobs: int | None = 1,
         verbose: bool = False,
         classification_calibration: str = "none",
         regression_calibration: str = "none",
@@ -237,6 +239,7 @@ class MIMIC(BaseEstimator, TransformerMixin):
         self.n_bootstrap = n_bootstrap
         self.random_state = random_state
         self.n_jobs = n_jobs
+        self.feature_n_jobs = feature_n_jobs
         self.verbose = verbose
         self.classification_calibration = classification_calibration
         self.regression_calibration = regression_calibration
@@ -257,7 +260,7 @@ class MIMIC(BaseEstimator, TransformerMixin):
         self.classification_calibrators_ = {}
         self.regression_calibrators_ = {}
         self.calibration_scores_ = []
-        oob_calibration_data = {}
+        feature_specs = []
         for column in self.model_columns_:
             task = self._task_for(column)
             observed_mask = X[column].notna()
@@ -266,6 +269,11 @@ class MIMIC(BaseEstimator, TransformerMixin):
                 raise ValueError(f"Column {column!r} has too few observed rows")
             if task == "classification" and X.loc[observed_mask, column].nunique() < 2:
                 raise ValueError(f"Classification column {column!r} needs at least two observed classes")
+            bootstrap_samples = [
+                rng.choice(np.arange(len(observed_indices)), size=len(observed_indices), replace=True)
+                for _ in range(self.n_bootstrap_)
+            ]
+            feature_specs.append((column, bootstrap_samples))
 
         self.global_preprocessor_ = GlobalContextPreprocessor(include_missing_indicators=True)
         self.global_preprocessor_.fit(
@@ -275,102 +283,18 @@ class MIMIC(BaseEstimator, TransformerMixin):
         )
         Xp_all = self.global_preprocessor_.transform_all(X)
 
-        for column in self.model_columns_:
-            task = self._task_for(column)
-            observed_mask = X[column].notna()
-            observed_indices = np.flatnonzero(observed_mask.to_numpy())
-
-            context_columns = self._context_columns_for(column)
-            context_indices = self.global_preprocessor_.encoded_indices_for(context_columns)
-            label_encoder = None
-            y_observed = X.loc[observed_mask, column]
-            if task == "classification":
-                label_encoder = LabelEncoder()
-                y_full = label_encoder.fit_transform(y_observed.astype(str))
-                classes = label_encoder.classes_
-                target_scaler = None
-            else:
-                target_scaler = StandardScaler()
-                y_full = target_scaler.fit_transform(y_observed.astype(float).to_numpy().reshape(-1, 1)).ravel()
-                classes = None
-
-            members = []
-            oob_errors = []
-            oob_regression_predictions = []
-            oob_regression_true = []
-            oob_class_probabilities = []
-            oob_class_true = []
-            for b in range(self.n_bootstrap_):
-                sample_pos = rng.choice(np.arange(len(observed_indices)), size=len(observed_indices), replace=True)
-                sample_rows = observed_indices[sample_pos]
-                sampled_observed_positions = sample_pos
-                sampled_y = y_full[sampled_observed_positions]
-
-                Xp = Xp_all[sample_rows][:, context_indices]
-
-                encoder = self._new_encoder(task, b)
-                encoder.fit(Xp, sampled_y)
-                H = self._to_2d(encoder.transform(Xp))
-
-                decoder = self._new_decoder()
-                decoder.fit_target(column, task, H, sampled_y)
-                members.append(
-                    BootstrapMember(
-                        encoder=encoder,
-                        decoder=decoder,
-                        embedding_dim=H.shape[1],
-                    )
-                )
-
-                oob_source = np.setdiff1d(np.arange(len(observed_indices)), np.unique(sampled_observed_positions))
-                if len(oob_source):
-                    oob_rows = observed_indices[oob_source]
-                    Xp_oob = Xp_all[oob_rows][:, context_indices]
-                    H_oob = self._to_2d(encoder.transform(Xp_oob), width=H.shape[1])
-                    pred = decoder.predict_target(column, H_oob)
-                    if task == "regression":
-                        pred_raw = self._inverse_regression_target(pred.astype(float), target_scaler)
-                        true_raw = self._inverse_regression_target(y_full[oob_source].astype(float), target_scaler)
-                        err = pred_raw - true_raw
-                        oob_errors.extend(err.tolist())
-                        oob_regression_predictions.extend(pred_raw.tolist())
-                        oob_regression_true.extend(true_raw.tolist())
-                    else:
-                        p = self._align_proba_to_classes(
-                            decoder.predict_proba_target(column, H_oob),
-                            decoder.models_[column],
-                            len(classes),
-                        )
-                        oob_class_probabilities.append(p)
-                        oob_class_true.extend(y_full[oob_source].astype(int).tolist())
-
-            bias = float(np.mean(oob_errors)) if oob_errors else 0.0
-            noise = float(np.var(oob_errors, ddof=1)) if len(oob_errors) > 1 else 0.0
-            self.feature_modules_[column] = FeatureModule(
-                target_column=column,
-                task=task,
-                context_columns=context_columns,
-                context_indices=context_indices,
-                members=members,
-                observed_mask=observed_mask,
-                label_encoder=label_encoder,
-                target_scaler=target_scaler,
-                bias=bias,
-                noise=noise,
-                classes_=classes,
+        if self.feature_n_jobs in (None, 1):
+            fitted_features = [
+                self._fit_feature_module(X, Xp_all, column=column, bootstrap_samples=bootstrap_samples)
+                for column, bootstrap_samples in feature_specs
+            ]
+        else:
+            fitted_features = Parallel(n_jobs=self.feature_n_jobs)(
+                delayed(self._fit_feature_module)(X, Xp_all, column=column, bootstrap_samples=bootstrap_samples)
+                for column, bootstrap_samples in feature_specs
             )
-            if task == "regression":
-                oob_calibration_data[column] = {
-                    "task": task,
-                    "predictions": np.asarray(oob_regression_predictions, dtype=float),
-                    "true": np.asarray(oob_regression_true, dtype=float),
-                }
-            else:
-                oob_calibration_data[column] = {
-                    "task": task,
-                    "probabilities": np.vstack(oob_class_probabilities) if oob_class_probabilities else np.empty((0, len(classes))),
-                    "true": np.asarray(oob_class_true, dtype=int),
-                }
+        self.feature_modules_ = {column: module for column, module, _data in fitted_features}
+        oob_calibration_data = {column: data for column, _module, data in fitted_features}
 
         self.train_embeddings_ = self.transform(X)
         self.embedding_slices_ = self._embedding_slices_
@@ -384,6 +308,103 @@ class MIMIC(BaseEstimator, TransformerMixin):
         self.neighbour_index_ = self._fit_neighbours(self.train_embeddings_)
         self._verbose_fit_summary()
         return self
+
+    def _fit_feature_module(self, X: pd.DataFrame, Xp_all, *, column: str, bootstrap_samples: list[np.ndarray]):
+        task = self._task_for(column)
+        observed_mask = X[column].notna()
+        observed_indices = np.flatnonzero(observed_mask.to_numpy())
+
+        context_columns = self._context_columns_for(column)
+        context_indices = self.global_preprocessor_.encoded_indices_for(context_columns)
+        label_encoder = None
+        y_observed = X.loc[observed_mask, column]
+        if task == "classification":
+            label_encoder = LabelEncoder()
+            y_full = label_encoder.fit_transform(y_observed.astype(str))
+            classes = label_encoder.classes_
+            target_scaler = None
+        else:
+            target_scaler = StandardScaler()
+            y_full = target_scaler.fit_transform(y_observed.astype(float).to_numpy().reshape(-1, 1)).ravel()
+            classes = None
+
+        members = []
+        oob_errors = []
+        oob_regression_predictions = []
+        oob_regression_true = []
+        oob_class_probabilities = []
+        oob_class_true = []
+        for b, sample_pos in enumerate(bootstrap_samples):
+            sample_rows = observed_indices[sample_pos]
+            sampled_observed_positions = sample_pos
+            sampled_y = y_full[sampled_observed_positions]
+
+            Xp = Xp_all[sample_rows][:, context_indices]
+
+            encoder = self._new_encoder(task, b)
+            encoder.fit(Xp, sampled_y)
+            H = self._to_2d(encoder.transform(Xp))
+
+            decoder = self._new_decoder()
+            decoder.fit_target(column, task, H, sampled_y)
+            members.append(
+                BootstrapMember(
+                    encoder=encoder,
+                    decoder=decoder,
+                    embedding_dim=H.shape[1],
+                )
+            )
+
+            oob_source = np.setdiff1d(np.arange(len(observed_indices)), np.unique(sampled_observed_positions))
+            if len(oob_source):
+                oob_rows = observed_indices[oob_source]
+                Xp_oob = Xp_all[oob_rows][:, context_indices]
+                H_oob = self._to_2d(encoder.transform(Xp_oob), width=H.shape[1])
+                pred = decoder.predict_target(column, H_oob)
+                if task == "regression":
+                    pred_raw = self._inverse_regression_target(pred.astype(float), target_scaler)
+                    true_raw = self._inverse_regression_target(y_full[oob_source].astype(float), target_scaler)
+                    err = pred_raw - true_raw
+                    oob_errors.extend(err.tolist())
+                    oob_regression_predictions.extend(pred_raw.tolist())
+                    oob_regression_true.extend(true_raw.tolist())
+                else:
+                    p = self._align_proba_to_classes(
+                        decoder.predict_proba_target(column, H_oob),
+                        decoder.models_[column],
+                        len(classes),
+                    )
+                    oob_class_probabilities.append(p)
+                    oob_class_true.extend(y_full[oob_source].astype(int).tolist())
+
+        bias = float(np.mean(oob_errors)) if oob_errors else 0.0
+        noise = float(np.var(oob_errors, ddof=1)) if len(oob_errors) > 1 else 0.0
+        module = FeatureModule(
+            target_column=column,
+            task=task,
+            context_columns=context_columns,
+            context_indices=context_indices,
+            members=members,
+            observed_mask=observed_mask,
+            label_encoder=label_encoder,
+            target_scaler=target_scaler,
+            bias=bias,
+            noise=noise,
+            classes_=classes,
+        )
+        if task == "regression":
+            oob_calibration_data = {
+                "task": task,
+                "predictions": np.asarray(oob_regression_predictions, dtype=float),
+                "true": np.asarray(oob_regression_true, dtype=float),
+            }
+        else:
+            oob_calibration_data = {
+                "task": task,
+                "probabilities": np.vstack(oob_class_probabilities) if oob_class_probabilities else np.empty((0, len(classes))),
+                "true": np.asarray(oob_class_true, dtype=int),
+            }
+        return column, module, oob_calibration_data
 
     def transform(self, X):
         check_is_fitted(self, "feature_modules_")

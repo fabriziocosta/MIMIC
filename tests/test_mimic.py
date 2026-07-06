@@ -105,6 +105,32 @@ def test_global_context_preprocessor_context_slicing_and_unknown_categories():
     assert not set(preprocessor.column_indices_["segment"]) & set(preprocessor.encoded_indices_for(["age", "income", "outcome"]))
 
 
+def test_mimic_feature_parallel_fit_matches_sequential_structure():
+    df = make_frame(n=40)
+    kwargs = {
+        "mode": "identity",
+        "random_state": 0,
+        "n_bootstrap": 2,
+        "columns": {
+            "ignore": ["id"],
+            "regression": ["age", "income"],
+            "classification": ["segment", "outcome"],
+        },
+    }
+
+    sequential = MIMIC(**kwargs, feature_n_jobs=1).fit(df)
+    parallel = MIMIC(**kwargs, feature_n_jobs=2).fit(df)
+    sequential_sample = sequential.sample(3)
+    parallel_sample = parallel.sample(3)
+
+    assert parallel.feature_n_jobs == 2
+    assert list(parallel.feature_modules_) == list(sequential.feature_modules_)
+    assert parallel.train_embeddings_.shape == sequential.train_embeddings_.shape
+    assert parallel.embedding_slices_ == sequential.embedding_slices_
+    assert parallel_sample.shape == sequential_sample.shape
+    assert parallel_sample.columns.tolist() == sequential_sample.columns.tolist()
+
+
 def test_pairwise_feature_plot_diagonal_histograms_do_not_share_feature_y_axis():
     original = pd.DataFrame(
         {
