@@ -21,7 +21,7 @@ from mimic import (
     sample,
     sample_dataframe,
 )
-from mimic.diagnostics import pairwise_feature_plot
+from mimic.diagnostics import categorical_feature_plot, categorical_feature_report, pairwise_feature_plot
 from mimic.mimic import GlobalContextPreprocessor
 
 
@@ -140,6 +140,49 @@ def test_pairwise_feature_plot_caps_histogram_bins():
     twin_axes = [ax for ax in grid.fig.axes if ax not in grid.axes.flat]
     for ax in twin_axes:
         assert len(ax.patches) <= 40
+
+
+def test_pairwise_feature_plot_can_log1p_selected_features():
+    original = pd.DataFrame({"age": [20, 30, 40], "capital-gain": [0, 1000, 100000]})
+    generated = pd.DataFrame({"age": [25, 35, 45], "capital-gain": [0, 500, 1200]})
+
+    grid = pairwise_feature_plot(
+        original,
+        generated,
+        features=["age", "capital-gain"],
+        log1p_features=["capital-gain"],
+        max_rows_per_source=None,
+    )
+
+    assert grid.axes[1, 0].get_ylabel() == "log1p(capital-gain)"
+    assert grid.axes[1, 1].get_xlabel() == "log1p(capital-gain)"
+
+
+def test_categorical_feature_report_and_plot_compare_proportions():
+    original = pd.DataFrame({"segment": ["a", "a", "b", "c"], "label": ["yes", "no", "yes", "yes"]})
+    generated = pd.DataFrame({"segment": ["a", "b", "b", "b"], "label": ["yes", "no", "no", "yes"]})
+
+    report, summary = categorical_feature_report(
+        original,
+        generated,
+        features=["segment", "label"],
+        original_label="heldout",
+        generated_label="synthetic",
+    )
+    fig, axes, plot_report, plot_summary = categorical_feature_plot(
+        original,
+        generated,
+        features=["segment", "label"],
+        original_label="heldout",
+        generated_label="synthetic",
+    )
+
+    assert {"feature", "category", "heldout_proportion", "synthetic_proportion", "absolute_difference"}.issubset(report.columns)
+    assert {"feature", "total_variation_distance", "n_categories"}.issubset(summary.columns)
+    assert summary.loc[summary["feature"] == "segment", "total_variation_distance"].iat[0] > 0
+    assert len(axes) == 2
+    assert not plot_report.empty
+    assert not plot_summary.empty
 
 
 def test_random_forest_encoder_sparse_and_svd():

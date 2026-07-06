@@ -6,6 +6,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
+from mimic.diagnostics import classical_mds_2d
+
 GENERATED_COLOR = "#ff2e0e"
 ORIGINAL_MAJORITY_COLOR = "#9aa0a6"
 ORIGINAL_MINORITY_COLOR = "#1f77b4"
@@ -160,3 +162,224 @@ def identity_generation_plot(
     ax.legend(frameon=False, fontsize="small")
     fig.tight_layout()
     return summary, samples, trace, fig, ax
+
+
+def plot_feature_embedding_grid(
+    model,
+    df: pd.DataFrame,
+    columns: list[str] | None = None,
+    *,
+    n_cols: int = 4,
+    random_state=None,
+    point_size: int = 12,
+    alpha: float = 0.75,
+):
+    """Plot one 2D projection per feature embedding, coloured by that feature's raw value."""
+
+    columns = list(model.model_columns_ if columns is None else columns)
+    if not columns:
+        raise ValueError("columns must contain at least one feature")
+
+    H = model.transform(df)
+    n_cols = max(1, int(n_cols))
+    n_rows = int(np.ceil(len(columns) / n_cols))
+    fig, axes = plt.subplots(n_rows, n_cols, figsize=(3.0 * n_cols, 2.7 * n_rows), squeeze=False)
+    flat_axes = axes.ravel()
+
+    for ax, column in zip(flat_axes, columns):
+        if column not in model.embedding_slices_:
+            raise ValueError(f"Unknown embedding column {column!r}")
+        sl = model.embedding_slices_[column]
+        coords = classical_mds_2d(H[:, sl], random_state=random_state)
+        values = df[column]
+        if pd.api.types.is_numeric_dtype(values):
+            scatter = ax.scatter(
+                coords["mds1"],
+                coords["mds2"],
+                c=pd.to_numeric(values, errors="coerce"),
+                s=point_size,
+                alpha=alpha,
+                cmap="viridis",
+                edgecolor="none",
+            )
+            fig.colorbar(scatter, ax=ax, fraction=0.046, pad=0.02)
+        else:
+            labels = values.astype("object").where(values.notna(), "__missing__")
+            codes, uniques = pd.factorize(labels)
+            ax.scatter(
+                coords["mds1"],
+                coords["mds2"],
+                c=codes,
+                s=point_size,
+                alpha=alpha,
+                cmap="tab20",
+                edgecolor="none",
+            )
+            ax.text(
+                0.02,
+                0.02,
+                f"{len(uniques)} categories",
+                transform=ax.transAxes,
+                fontsize="x-small",
+                alpha=0.7,
+            )
+        ax.set_title(column, fontsize="medium")
+        ax.set_xticks([])
+        ax.set_yticks([])
+
+    for ax in flat_axes[len(columns) :]:
+        ax.set_axis_off()
+
+    fig.tight_layout()
+    return fig, axes
+
+
+def pareto_feature_pair_report(
+    df: pd.DataFrame,
+    target: str,
+    columns: list[str] | None = None,
+    *,
+    max_pairs: int | None = None,
+) -> pd.DataFrame:
+    """Rank feature pairs by high target association and low inter-feature association."""
+
+    columns = [c for c in (df.columns if columns is None else columns) if c != target]
+    target_scores = {column: _feature_association(df[column], df[target]) for column in columns}
+    rows = []
+    for i, left in enumerate(columns):
+        for right in columns[i + 1 :]:
+            target_association = float((target_scores[left] + target_scores[right]) / 2)
+            pair_association = float(_feature_association(df[left], df[right]))
+            rows.append(
+                {
+                    "feature_x": left,
+                    "feature_y": right,
+                    "target_association": target_association,
+                    "pair_association": pair_association,
+                    "pareto": False,
+                }
+            )
+    report = pd.DataFrame(rows)
+    if report.empty:
+        return report
+
+    scores = report[["target_association", "pair_association"]].to_numpy()
+    pareto = np.ones(len(report), dtype=bool)
+    for i, (target_score, pair_score) in enumerate(scores):
+        dominates = (
+            (scores[:, 0] >= target_score)
+            & (scores[:, 1] <= pair_score)
+            & ((scores[:, 0] > target_score) | (scores[:, 1] < pair_score))
+        )
+        pareto[i] = not dominates.any()
+    report["pareto"] = pareto
+    report = report.sort_values(["pareto", "target_association", "pair_association"], ascending=[False, False, True])
+    if max_pairs is not None:
+        pareto_part = report[report["pareto"]].head(max_pairs)
+        non_pareto_part = report[~report["pareto"]]
+        report = pd.concat([pareto_part, non_pareto_part], ignore_index=True)
+    return report.reset_index(drop=True)
+
+
+def plot_pareto_feature_pairs(
+    df: pd.DataFrame,
+    target: str,
+    columns: list[str] | None = None,
+    *,
+    max_pairs: int = 6,
+):
+    """Plot Pareto-optimal feature pairs coloured by the target column."""
+
+    report = pareto_feature_pair_report(df, target, columns=columns, max_pairs=max_pairs)
+    front = report[report["pareto"]].head(max_pairs)
+    if front.empty:
+        raise ValueError("No feature pairs are available for Pareto plotting")
+
+    n_cols = min(3, len(front))
+    n_rows = int(np.ceil(len(front) / n_cols))
+    fig, axes = plt.subplots(n_rows, n_cols, figsize=(4.0 * n_cols, 3.4 * n_rows), squeeze=False)
+    flat_axes = axes.ravel()
+    target_values = df[target]
+    target_is_numeric = pd.api.types.is_numeric_dtype(target_values)
+    if target_is_numeric:
+        color_values = pd.to_numeric(target_values, errors="coerce")
+        uniques = None
+    else:
+        labels = target_values.astype("object").where(target_values.notna(), "__missing__")
+        color_values, uniques = pd.factorize(labels)
+
+    for ax, row in zip(flat_axes, front.itertuples(index=False)):
+        x = _plot_axis_values(df[row.feature_x])
+        y = _plot_axis_values(df[row.feature_y])
+        scatter = ax.scatter(x, y, c=color_values, cmap="viridis" if target_is_numeric else "tab10", s=16, alpha=0.72, edgecolor="none")
+        ax.set_xlabel(row.feature_x)
+        ax.set_ylabel(row.feature_y)
+        ax.set_title(f"target={row.target_association:.2f}, pair={row.pair_association:.2f}", fontsize="small")
+        if not pd.api.types.is_numeric_dtype(df[row.feature_x]):
+            ax.set_xticks(sorted(pd.unique(x)))
+        if not pd.api.types.is_numeric_dtype(df[row.feature_y]):
+            ax.set_yticks(sorted(pd.unique(y)))
+
+    for ax in flat_axes[len(front) :]:
+        ax.set_axis_off()
+
+    if target_is_numeric:
+        fig.colorbar(scatter, ax=flat_axes[: len(front)], label=target, fraction=0.025, pad=0.02)
+    elif uniques is not None:
+        handles = scatter.legend_elements()[0]
+        fig.legend(handles, [str(u) for u in uniques], title=target, loc="center right", frameon=False)
+        fig.subplots_adjust(right=0.86)
+    fig.tight_layout()
+    return fig, axes, report
+
+
+def _plot_axis_values(series: pd.Series):
+    if pd.api.types.is_numeric_dtype(series):
+        return pd.to_numeric(series, errors="coerce")
+    codes, _uniques = pd.factorize(series.astype("object").where(series.notna(), "__missing__"))
+    return codes
+
+
+def _feature_association(left: pd.Series, right: pd.Series) -> float:
+    left = pd.Series(left)
+    right = pd.Series(right)
+    mask = left.notna() & right.notna()
+    if mask.sum() < 2:
+        return 0.0
+    left = left[mask]
+    right = right[mask]
+    left_numeric = pd.api.types.is_numeric_dtype(left)
+    right_numeric = pd.api.types.is_numeric_dtype(right)
+    if left_numeric and right_numeric:
+        corr = pd.to_numeric(left, errors="coerce").corr(pd.to_numeric(right, errors="coerce"))
+        return 0.0 if pd.isna(corr) else float(abs(corr))
+    if left_numeric != right_numeric:
+        numeric = pd.to_numeric(left if left_numeric else right, errors="coerce")
+        categorical = right if left_numeric else left
+        return _correlation_ratio(categorical, numeric)
+    return _cramers_v(left, right)
+
+
+def _correlation_ratio(categories: pd.Series, values: pd.Series) -> float:
+    frame = pd.DataFrame({"category": categories.astype("object"), "value": values}).dropna()
+    if frame.empty:
+        return 0.0
+    grand_mean = frame["value"].mean()
+    total = ((frame["value"] - grand_mean) ** 2).sum()
+    if total <= 0:
+        return 0.0
+    between = frame.groupby("category")["value"].agg(lambda x: len(x) * (x.mean() - grand_mean) ** 2).sum()
+    return float(np.sqrt(max(0.0, between / total)))
+
+
+def _cramers_v(left: pd.Series, right: pd.Series) -> float:
+    table = pd.crosstab(left.astype("object"), right.astype("object"))
+    n = table.to_numpy().sum()
+    if n == 0:
+        return 0.0
+    expected = np.outer(table.sum(axis=1).to_numpy(), table.sum(axis=0).to_numpy()) / n
+    observed = table.to_numpy()
+    valid = expected > 0
+    chi2 = (((observed - expected) ** 2) / np.where(valid, expected, 1.0))[valid].sum()
+    denom = n * max(1, min(table.shape) - 1)
+    return 0.0 if denom == 0 else float(np.sqrt(chi2 / denom))

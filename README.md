@@ -69,6 +69,25 @@ dataframe values:
 fig, axes = model.plot(df, embedding_columns=["age", "income"], color_by="segment")
 ```
 
+Synthetic-data diagnostics include numeric pairwise plots and categorical
+distribution comparisons:
+
+```python
+from mimic.diagnostics import categorical_feature_report, pairwise_feature_plot
+
+pairwise_feature_plot(
+    heldout,
+    synthetic,
+    features=["age", "hours-per-week", "capital-gain", "capital-loss"],
+    log1p_features=["capital-gain", "capital-loss"],
+)
+category_report, category_summary = categorical_feature_report(
+    heldout,
+    synthetic,
+    features=["workclass", "education", "income"],
+)
+```
+
 `MIMIC` also provides simplified `mode` and `capacity` presets. The default
 `mode="joint", capacity=0.5` uses neural components, `n_bootstrap=3`, and a
 mutual-neighbour displacement generation policy:
