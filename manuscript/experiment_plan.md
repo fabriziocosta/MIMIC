@@ -6,6 +6,8 @@ Run MIMIC on the same dataset configurations and evaluation protocols used in ma
 
 Rule for every experiment: MIMIC is trained and sampled only inside each paper's training fold or training split. Published competitor numbers are copied as reference targets, and MIMIC is evaluated with the same classifier family and performance metric wherever practical.
 
+Implementation pattern for notebooks and reusable experiment modules is captured in `manuscript/experiments/notebook_pattern.md`. Use that pattern when adding Q2 and later experiment notebooks.
+
 ## Question 1: Can MIMIC Match Classical SMOTE-Style ROC Utility?
 
 ### Competitor Paper
@@ -45,16 +47,47 @@ Use this as the historical ROC/AUC benchmark. The paper evaluates SMOTE plus maj
 - Secondary: ROC convex hull membership compared with published SMOTE/under-sampling curves.
 - Adult-specific: report mixed-type MIMIC against the SMOTE-NC motivation, and numeric-only MIMIC against the paper's continuous-feature SMOTE setup.
 
+### Published C4.5 AUC Reference Values
+
+The SMOTE paper reports AUC values for C4.5 in Table 3. The table prints AUCs as four digits without a decimal point; for this plan they are recorded as decimals. These are the direct AUC values to compare against MIMIC's C4.5-compatible decision-tree approximation.
+
+| Dataset | Under-sampling AUC | 50 SMOTE | 100 SMOTE | 200 SMOTE | 300 SMOTE | 400 SMOTE | 500 SMOTE | Best reported C4.5 AUC | Best reported setting |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---|
+| Pima | 0.7242 |  | 0.7307 |  |  |  |  | 0.7307 | 100 SMOTE |
+| Phoneme | 0.8622 |  | 0.8644 | 0.8661 |  |  |  | 0.8661 | 200 SMOTE |
+| Satimage | 0.8900 |  | 0.8957 | 0.8979 | 0.8963 | 0.8975 | 0.8960 | 0.8979 | 200 SMOTE |
+| Forest Cover | 0.9807 |  | 0.9832 | 0.9834 | 0.9849 | 0.9841 | 0.9842 | 0.9849 | 300 SMOTE |
+| Oil | 0.8524 |  | 0.8523 | 0.8368 | 0.8161 | 0.8339 | 0.8537 | 0.8537 | 500 SMOTE |
+| Mammography | 0.9260 |  | 0.9250 | 0.9265 | 0.9311 | 0.9330 | 0.9304 | 0.9330 | 400 SMOTE |
+| E-state | 0.6811 |  | 0.6792 | 0.6828 | 0.6784 | 0.6788 | 0.6779 | 0.6828 | 200 SMOTE |
+| Can | 0.9535 | 0.9560 | 0.9505 | 0.9505 | 0.9494 | 0.9472 | 0.9470 | 0.9560 | 50 SMOTE |
+
+Notes:
+
+- Table 3 is C4.5-only; the paper does not provide corresponding AUC tables for Ripper or Naive Bayes.
+- Adult is not included in Table 3. The paper discusses Adult separately for SMOTE-NC and continuous-only SMOTE, where the reported comparison is primarily graphical and described as not improving over plain under-sampling by AUC.
+- MIMIC should be compared both to the under-sampling AUC and to the best reported SMOTE C4.5 AUC for each available dataset.
+
 ### Comparable Number To Produce
 
 For each available dataset, produce:
 
-| Dataset | Classifier | Published SMOTE reference | MIMIC AUC | MIMIC ROC hull status |
-|---|---|---|---:|---|
-| Pima | C4.5-compatible tree | ROC/AUC from SMOTE paper | | |
-| Pima | RIPPER-compatible rule model | ROC/AUC from SMOTE paper | | |
-| Adult | C4.5-compatible tree | SMOTE-NC / continuous SMOTE reference | | |
-| Mammography | C4.5-compatible tree | SMOTE vs replicate ROC reference | | |
+| Dataset | Classifier | Under-sampling AUC | Best published SMOTE C4.5 AUC | MIMIC AUC | MIMIC vs best SMOTE | MIMIC ROC hull status |
+|---|---|---:|---:|---:|---:|---|
+| Pima | C4.5-compatible tree | 0.7242 | 0.7307 | 0.7095 | -0.0212 | pending hull comparison |
+| Phoneme | C4.5-compatible tree | 0.8622 | 0.8661 | 0.8597 | -0.0064 | pending hull comparison |
+| Satimage | C4.5-compatible tree | 0.8900 | 0.8979 | | | |
+| Forest Cover | C4.5-compatible tree | 0.9807 | 0.9849 | | | |
+| Oil | C4.5-compatible tree | 0.8524 | 0.8537 | | | |
+| Mammography | C4.5-compatible tree | 0.9260 | 0.9330 | | | |
+| E-state | C4.5-compatible tree | 0.6811 | 0.6828 | | | |
+| Can | C4.5-compatible tree | 0.9535 | 0.9560 | | | |
+| Adult | C4.5-compatible tree | not tabulated | not tabulated | | | SMOTE-NC / continuous-only comparison is graphical/descriptive |
+
+Filled MIMIC values currently come from:
+
+- `manuscript/artifacts/q1_smote_roc/tables/pima__run_full__factorised__cap-0.25__smote-normal-k5__seed-0__summary.csv`
+- `manuscript/artifacts/q1_smote_roc/tables/phoneme__run_full__factorised__cap-0.25__smote-normal-k5__seed-0__summary.csv`
 
 Implementation note: if exact C4.5/RIPPER tooling is not practical, use scikit-learn decision tree as a transparent approximation and label the table "protocol-aligned, classifier-substituted".
 

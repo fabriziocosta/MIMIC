@@ -639,12 +639,23 @@ def _experiment_status(
     )
     saved_profile = "run_full" if run_profile == "view" else run_profile
     expected_folds = 10
-    prefix = (
+    stem = (
         f"{_safe_name(dataset_key)}__{_safe_name(saved_profile)}__"
         f"{_safe_name(mimic_mode)}__cap-{mimic_capacity:g}__"
         f"{_safe_name(selected_policy.method)}-{_safe_name(selected_policy.neighbour_mode)}-"
-        f"k{selected_policy.n_neighbors}__seed-{random_state}__fold-"
+        f"k{selected_policy.n_neighbors}__seed-{random_state}"
     )
+    summary_path = Path(artifact_dir) / "tables" / f"{stem}__summary.csv"
+    if summary_path.exists():
+        return "complete: current summary csv"
+
+    existing_summaries = sorted((Path(artifact_dir) / "tables").glob(f"{_safe_name(dataset_key)}__run_full__*__summary.csv"))
+    if existing_summaries:
+        labels = [_summary_label(path, dataset_key=dataset_key) for path in existing_summaries[:2]]
+        suffix = "" if len(existing_summaries) <= 2 else f"; +{len(existing_summaries) - 2} more"
+        return f"existing: {'; '.join(labels)}{suffix}"
+
+    prefix = f"{stem}__fold-"
     completed_folds = {
         int(path.name.removeprefix(prefix).split("__", 1)[0])
         for path in (Path(artifact_dir) / "models").glob(f"{prefix}*.joblib")
@@ -729,6 +740,14 @@ def _config_artifact_stem(config: Q1Config) -> str:
 
 def _safe_name(value) -> str:
     return "".join(char if char.isalnum() or char in {"-", "_"} else "-" for char in str(value))
+
+
+def _summary_label(path: Path, *, dataset_key: str) -> str:
+    stem = path.name.removesuffix("__summary.csv")
+    prefix = f"{_safe_name(dataset_key)}__run_full__"
+    if stem.startswith(prefix):
+        stem = stem.removeprefix(prefix)
+    return stem.replace("__", " ")
 
 
 def _configure_worker_threads(worker_threads: int) -> None:

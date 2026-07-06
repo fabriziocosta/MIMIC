@@ -47,6 +47,35 @@ def test_q1_dataset_registry_reports_cached_experiment_status(tmp_path):
     assert experiment == "complete: 10/10 folds"
 
 
+def test_q1_dataset_registry_reports_saved_summary_status(tmp_path):
+    table_dir = tmp_path / "tables"
+    table_dir.mkdir()
+    summary = table_dir / "pima__run_full__factorised__cap-0.25__smote-normal-k5__seed-0__summary.csv"
+    summary.write_text("dataset_key,roc_curve_auc\npima,0.7\n")
+
+    registry = q1_dataset_registry(artifact_dir=tmp_path, run_profile="view", mimic_capacity=0.25)
+
+    experiment = registry.set_index("key").loc["pima", "experiment"]
+    assert experiment == "complete: current summary csv"
+
+
+def test_q1_dataset_registry_reports_existing_other_config_summaries(tmp_path):
+    table_dir = tmp_path / "tables"
+    table_dir.mkdir()
+    summary = table_dir / "pima__run_full__factorised__cap-0.25__smote-normal-k5__seed-0__summary.csv"
+    summary.write_text("dataset_key,roc_curve_auc\npima,0.7\n")
+
+    registry = q1_dataset_registry(
+        artifact_dir=tmp_path,
+        run_profile="run_full",
+        mimic_mode="joint",
+        mimic_capacity=0.35,
+    )
+
+    experiment = registry.set_index("key").loc["pima", "experiment"]
+    assert experiment == "existing: factorised cap-0.25 smote-normal-k5 seed-0"
+
+
 def test_load_satimage_pins_openml_data_id(monkeypatch):
     calls = []
 
