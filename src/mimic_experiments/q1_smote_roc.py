@@ -8,7 +8,8 @@ import os
 from pathlib import Path
 import time
 
-from joblib import Parallel, delayed
+from joblib import Parallel, delayed, effective_n_jobs
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from sklearn.compose import ColumnTransformer
@@ -38,10 +39,11 @@ def print_progress_event(event: dict) -> None:
     completed = event.get("completed")
     total = event.get("total")
     fold = event.get("fold")
+    parallel_workers = event.get("parallel_workers", 1)
     elapsed = event.get("elapsed")
     eta = event.get("eta")
     if completed == 0:
-        print(f"Starting Q1 fold jobs: 0/{total} complete")
+        print(f"Starting Q1 fold jobs: 0/{total} complete ({parallel_workers} worker(s))")
         return
     fold_text = f" fold {fold}" if fold is not None else ""
     eta_text = f", ETA {eta}" if eta is not None else ""
@@ -51,12 +53,10 @@ def print_progress_event(event: dict) -> None:
 @dataclass(frozen=True)
 class Q1Config:
     dataset_key: str = "adult_mixed"
-    run_profile: str = "smoke"
+    run_profile: str = "run_full"
     random_state: int = 0
-    n_rows_smoke: int = 250
     mimic_mode: str = "factorised"
-    mimic_capacity_smoke: float = 0.0
-    mimic_capacity_paper: float = 0.25
+    mimic_capacity_run_full: float = 0.25
     deficit_fractions: tuple[float, ...] = (0.0, 0.25, 0.5, 0.75, 1.0)
     n_jobs: int = 1
     artifact_dir: str | None = None
@@ -73,19 +73,35 @@ class Q1Config:
 
     @property
     def n_splits(self) -> int:
-        return 3 if self.run_profile == "smoke" else 10
+        return 10
 
     @property
     def n_rows(self) -> int | None:
-        return self.n_rows_smoke if self.run_profile == "smoke" else None
+        return None
 
     @property
     def mimic_capacity(self) -> float:
-        return self.mimic_capacity_smoke if self.run_profile == "smoke" else self.mimic_capacity_paper
+        return self.mimic_capacity_run_full
+
+    @property
+    def saves_as_profile(self) -> str:
+        return "run_full" if self.run_profile == "view" else self.run_profile
+
+    @property
+    def should_run_experiment(self) -> bool:
+        return self.run_profile != "view"
 
 
-def q1_dataset_registry() -> pd.DataFrame:
-    return pd.DataFrame(
+def q1_dataset_registry(
+    *,
+    artifact_dir: str | Path | None = None,
+    run_profile: str = "run_full",
+    mimic_mode: str = "factorised",
+    mimic_capacity: float = 0.25,
+    policy: GenerationPolicy | None = None,
+    random_state: int = 0,
+) -> pd.DataFrame:
+    registry = pd.DataFrame(
         [
             {"key": "pima", "dataset": "Pima", "majority": 500, "minority": 268, "status": "ready: OpenML data_id=37"},
             {
@@ -115,7 +131,7 @@ def q1_dataset_registry() -> pd.DataFrame:
                 "dataset": "Satimage",
                 "majority": 5809,
                 "minority": 626,
-                "status": "ready: OpenML name=satimage; smallest class vs rest",
+                "status": "ready: OpenML data_id=182; smallest class vs rest",
             },
             {
                 "key": "forest_cover",
@@ -135,6 +151,19 @@ def q1_dataset_registry() -> pd.DataFrame:
             {"key": "can", "dataset": "Can", "majority": 435512, "minority": 8360, "status": "optional: source needed"},
         ]
     )
+    registry["experiment"] = [
+        _experiment_status(
+            key,
+            artifact_dir=artifact_dir,
+            run_profile=run_profile,
+            mimic_mode=mimic_mode,
+            mimic_capacity=mimic_capacity,
+            policy=policy,
+            random_state=random_state,
+        )
+        for key in registry["key"]
+    ]
+    return registry
 
 
 def standardize_binary_frame(X, y, *, minority_value=None, target: str = "label") -> pd.DataFrame:
@@ -418,14 +447,23 @@ def run_mimic_roc_sweep(frame: pd.DataFrame, config: Q1Config, progress=None) ->
             }
         ]
     )
+    save_q1_result_tables(config, roc_points, summary)
     return roc_points, summary
 
 
 def run_q1_fold_jobs(frame: pd.DataFrame, config: Q1Config, progress=None) -> pd.DataFrame:
     jobs = fold_indices(frame, config)
     total = len(jobs)
+    parallel_workers = _effective_worker_count(config.n_jobs, total)
     progress_state = {"completed": 0, "started_at": time.monotonic()}
-    _emit_progress(progress, completed=0, total=total, started_at=progress_state["started_at"], fold=None)
+    _emit_progress(
+        progress,
+        completed=0,
+        total=total,
+        started_at=progress_state["started_at"],
+        fold=None,
+        parallel_workers=parallel_workers,
+    )
     if config.n_jobs == 1:
         results = []
         for fold, train_idx, test_idx in jobs:
@@ -438,6 +476,7 @@ def run_q1_fold_jobs(frame: pd.DataFrame, config: Q1Config, progress=None) -> pd
                 total=total,
                 started_at=progress_state["started_at"],
                 fold=fold,
+                parallel_workers=parallel_workers,
             )
     else:
         task_iter = (
@@ -457,6 +496,7 @@ def run_q1_fold_jobs(frame: pd.DataFrame, config: Q1Config, progress=None) -> pd
                     total=total,
                     started_at=progress_state["started_at"],
                     fold=fold,
+                    parallel_workers=parallel_workers,
                 )
         except TypeError:
             task_iter = (
@@ -464,7 +504,14 @@ def run_q1_fold_jobs(frame: pd.DataFrame, config: Q1Config, progress=None) -> pd
                 for fold, train_idx, test_idx in jobs
             )
             results = Parallel(n_jobs=config.n_jobs)(task_iter)
-            _emit_progress(progress, completed=total, total=total, started_at=progress_state["started_at"], fold=None)
+            _emit_progress(
+                progress,
+                completed=total,
+                total=total,
+                started_at=progress_state["started_at"],
+                fold=None,
+                parallel_workers=parallel_workers,
+            )
     return pd.concat(results, ignore_index=True)
 
 
@@ -477,6 +524,34 @@ def roc_curve_points(roc_points: pd.DataFrame) -> pd.DataFrame:
         ],
         ignore_index=True,
     ).sort_values(["mean_fpr", "mean_tpr"]).reset_index(drop=True)
+
+
+def plot_q1_roc_sweep(
+    roc_points: pd.DataFrame,
+    config: Q1Config,
+    *,
+    figsize: tuple[float, float] = (5.5, 5.0),
+):
+    curve = roc_curve_points(roc_points)
+    fig, ax = plt.subplots(figsize=figsize)
+    ax.plot(curve["mean_fpr"], curve["mean_tpr"], marker="o", linewidth=2, label="MIMIC ROC sweep")
+    ax.plot([0, 1], [0, 1], linestyle="--", color="black", alpha=0.55)
+    for _, row in roc_points.iterrows():
+        ax.annotate(
+            f"{row['deficit_fraction']:.2g}",
+            (row["mean_fpr"], row["mean_tpr"]),
+            textcoords="offset points",
+            xytext=(5, 5),
+        )
+    ax.set_title(f"Q1 MIMIC ROC sweep: {config.dataset_key}")
+    ax.set_xlabel("False positive rate")
+    ax.set_ylabel("True positive rate")
+    ax.set_xlim(0, 1)
+    ax.set_ylim(0, 1)
+    ax.grid(alpha=0.25)
+    ax.legend(frameon=False)
+    fig.tight_layout()
+    return fig, ax
 
 
 def manuscript_result_row(config: Q1Config, summary: pd.DataFrame) -> pd.DataFrame:
@@ -494,32 +569,117 @@ def manuscript_result_row(config: Q1Config, summary: pd.DataFrame) -> pd.DataFra
     )
 
 
+def save_q1_result_tables(config: Q1Config, roc_points: pd.DataFrame, summary: pd.DataFrame) -> dict[str, Path] | None:
+    paths = q1_result_table_paths(config)
+    if paths is None:
+        return None
+    paths["roc_points"].parent.mkdir(parents=True, exist_ok=True)
+    roc_points.to_csv(paths["roc_points"], index=False)
+    summary.to_csv(paths["summary"], index=False)
+    return paths
+
+
+def load_q1_result_tables(config: Q1Config) -> tuple[pd.DataFrame, pd.DataFrame]:
+    paths = q1_result_table_paths(config)
+    if paths is None:
+        raise ValueError("Q1 result tables require config.artifact_dir")
+    return pd.read_csv(paths["roc_points"]), pd.read_csv(paths["summary"])
+
+
+def q1_result_table_manifest(config: Q1Config) -> pd.DataFrame:
+    paths = q1_result_table_paths(config)
+    if paths is None:
+        return pd.DataFrame([{"table": "roc_points", "path": None}, {"table": "summary", "path": None}])
+    return pd.DataFrame(
+        [
+            {"table": name, "path": str(path)}
+            for name, path in paths.items()
+        ]
+    )
+
+
+def q1_result_table_paths(config: Q1Config) -> dict[str, Path] | None:
+    if config.artifact_dir is None:
+        return None
+    base = Path(config.artifact_dir) / "tables" / _config_artifact_stem(config)
+    return {
+        "roc_points": base.with_name(f"{base.name}__roc_points.csv"),
+        "summary": base.with_name(f"{base.name}__summary.csv"),
+    }
+
+
 def model_cache_path(config: Q1Config, *, fold: int, train_idx) -> Path | None:
     if config.artifact_dir is None or not config.cache_models:
         return None
     train_hash = _index_hash(train_idx)
-    policy = config.policy
     name = (
-        f"{_safe_name(config.dataset_key)}__{_safe_name(config.run_profile)}__"
-        f"{_safe_name(config.mimic_mode)}__cap-{config.mimic_capacity:g}__"
-        f"{_safe_name(policy.method)}-{_safe_name(policy.neighbour_mode)}-k{policy.n_neighbors}__"
-        f"seed-{config.random_state}__fold-{fold}__train-{train_hash}.joblib"
+        f"{_config_artifact_stem(config)}__fold-{fold}__train-{train_hash}.joblib"
     )
     return Path(config.artifact_dir) / "models" / name
 
 
-def _emit_progress(progress, *, completed, total: int, started_at: float, fold: int | None, now: float | None = None) -> None:
+def _experiment_status(
+    dataset_key: str,
+    *,
+    artifact_dir: str | Path | None,
+    run_profile: str,
+    mimic_mode: str,
+    mimic_capacity: float,
+    policy: GenerationPolicy | None,
+    random_state: int,
+) -> str:
+    if artifact_dir is None:
+        return "unknown: no artifact_dir"
+
+    selected_policy = policy or GenerationPolicy(
+        method="smote",
+        neighbour_mode="normal",
+        n_neighbors=5,
+        lambda_range=(0.0, 1.0),
+    )
+    saved_profile = "run_full" if run_profile == "view" else run_profile
+    expected_folds = 10
+    prefix = (
+        f"{_safe_name(dataset_key)}__{_safe_name(saved_profile)}__"
+        f"{_safe_name(mimic_mode)}__cap-{mimic_capacity:g}__"
+        f"{_safe_name(selected_policy.method)}-{_safe_name(selected_policy.neighbour_mode)}-"
+        f"k{selected_policy.n_neighbors}__seed-{random_state}__fold-"
+    )
+    completed_folds = {
+        int(path.name.removeprefix(prefix).split("__", 1)[0])
+        for path in (Path(artifact_dir) / "models").glob(f"{prefix}*.joblib")
+        if path.name.removeprefix(prefix).split("__", 1)[0].isdigit()
+    }
+    completed = len(completed_folds)
+    if completed >= expected_folds:
+        return f"complete: {expected_folds}/{expected_folds} folds"
+    if completed:
+        return f"partial: {completed}/{expected_folds} folds"
+    return "not run"
+
+
+def _emit_progress(
+    progress,
+    *,
+    completed,
+    total: int,
+    started_at: float,
+    fold: int | None,
+    now: float | None = None,
+    parallel_workers: int = 1,
+) -> None:
     if progress is None:
         return
     current = time.monotonic() if now is None else now
     elapsed = current - started_at
     eta = None
     if completed is not None and completed > 0:
-        eta = elapsed / completed * max(0, total - completed)
+        eta = elapsed / completed * max(0, total - completed) / max(1, parallel_workers)
     event = {
         "completed": completed,
         "total": total,
         "fold": fold,
+        "parallel_workers": parallel_workers,
         "elapsed_seconds": elapsed,
         "eta_seconds": eta,
         "elapsed": format_seconds(elapsed),
@@ -557,6 +717,16 @@ def _index_hash(indices) -> str:
     return blake2b(arr.tobytes(), digest_size=8).hexdigest()
 
 
+def _config_artifact_stem(config: Q1Config) -> str:
+    policy = config.policy
+    return (
+        f"{_safe_name(config.dataset_key)}__{_safe_name(config.saves_as_profile)}__"
+        f"{_safe_name(config.mimic_mode)}__cap-{config.mimic_capacity:g}__"
+        f"{_safe_name(policy.method)}-{_safe_name(policy.neighbour_mode)}-k{policy.n_neighbors}__"
+        f"seed-{config.random_state}"
+    )
+
+
 def _safe_name(value) -> str:
     return "".join(char if char.isalnum() or char in {"-", "_"} else "-" for char in str(value))
 
@@ -571,6 +741,14 @@ def _configure_worker_threads(worker_threads: int) -> None:
         torch.set_num_threads(int(value))
     except Exception:
         pass
+
+
+def _effective_worker_count(n_jobs: int, total: int) -> int:
+    try:
+        workers = effective_n_jobs(n_jobs)
+    except Exception:
+        workers = 1
+    return max(1, min(int(workers), int(total)))
 
 
 def _load_adult(*, numeric_only: bool, n_rows: int | None, random_state: int) -> pd.DataFrame:
@@ -588,7 +766,7 @@ def _load_adult(*, numeric_only: bool, n_rows: int | None, random_state: int) ->
 
 
 def _load_satimage(*, n_rows: int | None, random_state: int) -> pd.DataFrame:
-    dataset = fetch_openml(name="satimage", as_frame=True)
+    dataset = fetch_openml(data_id=182, as_frame=True)
     labels = pd.Series(dataset.target).astype("object")
     minority_value = labels.value_counts().idxmin()
     frame = standardize_binary_frame(dataset.data, labels, minority_value=minority_value)

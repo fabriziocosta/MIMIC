@@ -4,15 +4,22 @@ import pandas as pd
 from mimic_experiments.q1_smote_roc import (
     Q1Config,
     _emit_progress,
+    _effective_worker_count,
+    _load_satimage,
     fold_indices,
     format_seconds,
     generated_count_for_fraction,
     infer_mimic_columns,
+    load_q1_result_tables,
     manuscript_result_row,
     maybe_subsample,
     model_cache_path,
+    plot_q1_roc_sweep,
     q1_dataset_registry,
+    q1_result_table_manifest,
+    q1_result_table_paths,
     roc_curve_points,
+    save_q1_result_tables,
     standardize_binary_frame,
     _summarize_sampling_point,
 )
@@ -21,10 +28,45 @@ from mimic_experiments.q1_smote_roc import (
 def test_q1_dataset_registry_contains_ready_keys():
     registry = q1_dataset_registry()
 
-    assert {"key", "dataset", "majority", "minority", "status"}.issubset(registry.columns)
+    assert {"key", "dataset", "majority", "minority", "status", "experiment"}.issubset(registry.columns)
     assert {"adult_mixed", "adult_numeric", "pima", "phoneme", "satimage", "forest_cover", "mammography"}.issubset(
         set(registry["key"])
     )
+
+
+def test_q1_dataset_registry_reports_cached_experiment_status(tmp_path):
+    model_dir = tmp_path / "models"
+    model_dir.mkdir()
+    for fold in range(1, 11):
+        path = model_dir / f"pima__run_full__factorised__cap-0.25__smote-normal-k5__seed-0__fold-{fold}__train-test.joblib"
+        path.write_text("cached")
+
+    registry = q1_dataset_registry(artifact_dir=tmp_path, run_profile="view", mimic_capacity=0.25)
+
+    experiment = registry.set_index("key").loc["pima", "experiment"]
+    assert experiment == "complete: 10/10 folds"
+
+
+def test_load_satimage_pins_openml_data_id(monkeypatch):
+    calls = []
+
+    def fake_fetch_openml(*, data_id=None, name=None, as_frame=True):
+        calls.append({"data_id": data_id, "name": name, "as_frame": as_frame})
+        return type(
+            "Dataset",
+            (),
+            {
+                "data": pd.DataFrame({"x": [1, 2, 3, 4]}),
+                "target": pd.Series(["a", "a", "a", "b"]),
+            },
+        )()
+
+    monkeypatch.setattr("mimic_experiments.q1_smote_roc.fetch_openml", fake_fetch_openml)
+
+    frame = _load_satimage(n_rows=None, random_state=0)
+
+    assert calls == [{"data_id": 182, "name": None, "as_frame": True}]
+    assert frame["label"].tolist() == ["majority", "majority", "majority", "minority"]
 
 
 def test_standardize_binary_frame_uses_minority_class_by_default():
@@ -57,16 +99,38 @@ def test_roc_curve_points_adds_endpoints():
     assert curve[["mean_fpr", "mean_tpr"]].to_numpy().tolist() == [[0.0, 0.0], [0.2, 0.8], [1.0, 1.0]]
 
 
-def test_q1_config_profile_properties():
-    smoke = Q1Config(run_profile="smoke", n_rows_smoke=12)
-    paper = Q1Config(run_profile="paper", n_rows_smoke=12)
+def test_plot_q1_roc_sweep_returns_configured_figure():
+    points = pd.DataFrame(
+        {
+            "mean_fpr": [0.2, 0.4],
+            "mean_tpr": [0.7, 0.9],
+            "deficit_fraction": [0.5, 1.0],
+        }
+    )
 
-    assert smoke.n_splits == 3
-    assert smoke.n_rows == 12
-    assert smoke.mimic_capacity == smoke.mimic_capacity_smoke
-    assert paper.n_splits == 10
-    assert paper.n_rows is None
-    assert paper.mimic_capacity == paper.mimic_capacity_paper
+    fig, ax = plot_q1_roc_sweep(points, Q1Config(dataset_key="pima"))
+
+    assert ax.get_title() == "Q1 MIMIC ROC sweep: pima"
+    assert ax.get_xlabel() == "False positive rate"
+    assert ax.get_ylabel() == "True positive rate"
+    assert len(ax.lines) == 2
+    assert len(ax.texts) == 2
+    plt = fig.canvas.figure
+    plt.clear()
+
+
+def test_q1_config_profile_properties():
+    run_full = Q1Config(run_profile="run_full")
+    view = Q1Config(run_profile="view")
+
+    assert run_full.n_splits == 10
+    assert run_full.n_rows is None
+    assert run_full.mimic_capacity == run_full.mimic_capacity_run_full
+    assert run_full.saves_as_profile == "run_full"
+    assert run_full.should_run_experiment is True
+    assert view.n_splits == 10
+    assert view.saves_as_profile == "run_full"
+    assert view.should_run_experiment is False
 
 
 def test_maybe_subsample_is_reproducible():
@@ -88,6 +152,31 @@ def test_manuscript_result_row_shape():
     assert row.loc[0, "mimic_auc"] == 0.75
 
 
+def test_q1_result_tables_round_trip_to_artifact_dir(tmp_path):
+    config = Q1Config(dataset_key="pima", run_profile="run_full", artifact_dir=str(tmp_path))
+    roc_points = pd.DataFrame({"deficit_fraction": [0.0, 1.0], "mean_fpr": [0.1, 0.2], "mean_tpr": [0.6, 0.8]})
+    summary = pd.DataFrame({"dataset_key": ["pima"], "roc_curve_auc": [0.72]})
+
+    paths = save_q1_result_tables(config, roc_points, summary)
+    loaded_roc_points, loaded_summary = load_q1_result_tables(config)
+
+    assert paths == q1_result_table_paths(config)
+    assert paths["roc_points"].name == "pima__run_full__factorised__cap-0.25__smote-normal-k5__seed-0__roc_points.csv"
+    assert paths["summary"].exists()
+    pd.testing.assert_frame_equal(loaded_roc_points, roc_points)
+    pd.testing.assert_frame_equal(loaded_summary, summary)
+
+
+def test_q1_result_table_manifest_lists_concrete_paths(tmp_path):
+    config = Q1Config(dataset_key="pima", run_profile="view", artifact_dir=str(tmp_path))
+
+    manifest = q1_result_table_manifest(config)
+
+    assert manifest["table"].tolist() == ["roc_points", "summary"]
+    assert manifest["path"].str.endswith(".csv").all()
+    assert str(tmp_path / "tables") in manifest.loc[0, "path"]
+
+
 def test_format_seconds_uses_compact_units():
     assert format_seconds(4.2) == "4s"
     assert format_seconds(65) == "1m 05s"
@@ -95,16 +184,16 @@ def test_format_seconds_uses_compact_units():
 
 
 def test_fold_indices_are_stratified_and_counted():
-    frame = pd.DataFrame({"x": range(12), "label": ["majority"] * 6 + ["minority"] * 6})
-    config = Q1Config(run_profile="smoke")
+    frame = pd.DataFrame({"x": range(20), "label": ["majority"] * 10 + ["minority"] * 10})
+    config = Q1Config(run_profile="run_full")
 
     folds = fold_indices(frame, config)
 
-    assert len(folds) == 3
-    assert [fold for fold, _train, _test in folds] == [1, 2, 3]
+    assert len(folds) == 10
+    assert [fold for fold, _train, _test in folds] == list(range(1, 11))
     for _fold, train_idx, test_idx in folds:
         assert len(set(train_idx) & set(test_idx)) == 0
-        assert len(test_idx) == 4
+        assert len(test_idx) == 2
 
 
 def test_model_cache_path_uses_artifact_dir_and_fold(tmp_path):
@@ -149,10 +238,16 @@ def test_summarize_sampling_point_aggregates_fold_results():
 def test_emit_progress_builds_eta_event():
     events = []
 
-    _emit_progress(events.append, completed=2, total=5, started_at=0.0, fold=2, now=10.0)
+    _emit_progress(events.append, completed=2, total=5, started_at=0.0, fold=2, now=10.0, parallel_workers=3)
 
     assert events[0]["completed"] == 2
     assert events[0]["total"] == 5
     assert events[0]["fold"] == 2
+    assert events[0]["parallel_workers"] == 3
     assert events[0]["elapsed_seconds"] == 10.0
-    assert events[0]["eta_seconds"] == 15.0
+    assert events[0]["eta_seconds"] == 5.0
+
+
+def test_effective_worker_count_is_capped_by_total():
+    assert _effective_worker_count(1, 10) == 1
+    assert _effective_worker_count(999, 3) <= 3
