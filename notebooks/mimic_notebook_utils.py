@@ -113,9 +113,16 @@ def plot_oversampling(df: pd.DataFrame, generated: pd.DataFrame, title: str = "D
         ax.set_title(panel_title)
         ax.set_xlabel("x")
         ax.set_aspect("equal", adjustable="box")
-        ax.legend(frameon=False, fontsize="small")
+        ax.legend(
+            loc="upper center",
+            bbox_to_anchor=(0.5, -0.16),
+            ncol=2,
+            frameon=False,
+            fontsize="small",
+            borderaxespad=0.0,
+        )
     axes[0].set_ylabel("y")
-    fig.tight_layout()
+    fig.subplots_adjust(bottom=0.2, wspace=0.18)
     return fig, axes
 
 

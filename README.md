@@ -160,6 +160,23 @@ Explicit `encoder`, `decoder`, `policy`, `n_bootstrap`, or
 Set `verbose=True` to print constructor hyperparameters immediately and fitted
 data/embedding sizes during `fit`.
 
+Calibration is opt-in. When enabled, MIMIC uses out-of-bag bootstrap predictions
+from `fit()` to calibrate confidence outputs:
+
+```python
+model = MIMIC(
+    classification_calibration="temperature",  # or "isotonic"
+    regression_calibration="conformal",
+)
+model.fit(df)
+confidence = model.confidence(df)
+calibration = model.calibration_report()
+```
+
+Classification calibration adjusts reported probabilities. Regression conformal
+calibration adds interval columns such as `lower_90` and `upper_90` to
+`confidence()`.
+
 Synthetic generation can choose how generated embeddings are decoded back to
 rows with `generation_decode_mode`:
 

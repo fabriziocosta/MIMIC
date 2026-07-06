@@ -71,6 +71,9 @@ MIMIC(
     random_state=None,
     n_jobs=None,
     verbose=False,
+    classification_calibration="none",
+    regression_calibration="none",
+    calibration_interval_levels=(0.8, 0.9, 0.95),
 )
 ```
 
@@ -118,6 +121,8 @@ Explicit `encoder`, `decoder`, `policy`, `n_bootstrap`, or
 If a custom decoder is supplied and `generation_decode_mode="auto"`, decode-mode
 resolution follows the decoder capability rather than forcing the default
 `mode="factorised"` mode. `level` remains accepted as a compatibility alias, but new code should use `mode`.
+
+Calibration is explicit and disabled by default. `classification_calibration` accepts `"none"`, `"temperature"`, or `"isotonic"`; `regression_calibration` accepts `"none"` or `"conformal"`. Requested calibrators are fitted from out-of-bag bootstrap predictions during `fit()`. Calibrated classification probabilities are used by `confidence()`, and conformal regression calibration adds interval columns for `calibration_interval_levels`.
 
 `capacity` must be between `0` and `1` inclusive. It linearly maps preset
 hyperparameters from minimal to maximal values, except learning rate and weight

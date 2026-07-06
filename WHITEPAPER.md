@@ -588,6 +588,8 @@ High variance or high entropy indicates that the model is uncertain. This uncert
 
 A useful distinction is between uncertainty caused by noise in the observations and uncertainty caused by lack of model knowledge. This distinction is often described as aleatoric versus epistemic uncertainty in Bayesian deep learning. In MIMIC, bootstrap variation mainly targets epistemic uncertainty, while residual error and calibrated predictive distributions may be needed to capture aleatoric uncertainty.
 
+MIMIC can optionally calibrate its confidence outputs from out-of-bag bootstrap predictions. For categorical targets, temperature scaling or one-vs-rest isotonic regression can adjust reported class probabilities so that confidence better matches empirical accuracy. For regression targets, conformal calibration stores empirical residual quantiles and turns point predictions into intervals such as 80%, 90%, or 95% bands. These calibration steps are opt-in because they add fit-time work and should be evaluated for the dataset at hand.
+
 ### 8. What makes MIMIC different?
 
 MIMIC is best understood as a framework that unifies several operations that are often implemented separately.

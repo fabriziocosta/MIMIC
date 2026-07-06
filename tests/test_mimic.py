@@ -582,6 +582,120 @@ def test_default_mode_and_capacity_are_factorised_low_capacity():
     assert model.capacity == 0.25
 
 
+def test_calibration_constructor_validation():
+    df = make_frame(n=20)
+    base = {
+        "columns": {
+            "ignore": ["id"],
+            "regression": ["age", "income"],
+            "classification": ["segment", "outcome"],
+        },
+        "mode": "identity",
+    }
+
+    with pytest.raises(ValueError, match="classification_calibration must be one of"):
+        MIMIC(**base, classification_calibration="bad").fit(df)
+    with pytest.raises(ValueError, match="regression_calibration must be one of"):
+        MIMIC(**base, regression_calibration="bad").fit(df)
+    with pytest.raises(ValueError, match="calibration_interval_levels"):
+        MIMIC(**base, regression_calibration="conformal", calibration_interval_levels=(0.9, 1.0)).fit(df)
+
+
+def test_temperature_classification_calibration_fits_and_normalizes_probabilities():
+    df = make_frame(n=70)
+    model = MIMIC(
+        columns={
+            "ignore": ["id"],
+            "regression": ["age", "income"],
+            "classification": ["segment", "outcome"],
+        },
+        encoder=RandomForestPathEncoder(n_estimators=5, embedding_dim=3, random_state=20),
+        decoder=MixedFeatureDecoder.random_forest(n_estimators=5, random_state=20),
+        classification_calibration="temperature",
+        n_bootstrap=3,
+        random_state=20,
+    ).fit(df)
+
+    conf = model.confidence(df.head(8), columns=["segment"])
+    report = model.calibration_report()
+
+    assert "segment" in model.classification_calibrators_
+    assert report.loc[report["column"].eq("segment"), "status"].iat[0] == "fitted"
+    assert conf["probabilities"].map(lambda probs: abs(sum(probs.values()) - 1.0) < 1e-8).all()
+    assert conf["confidence"].between(0, 1).all()
+
+
+def test_isotonic_classification_calibration_fits_and_normalizes_probabilities():
+    df = make_frame(n=70)
+    model = MIMIC(
+        columns={
+            "ignore": ["id"],
+            "regression": ["age", "income"],
+            "classification": ["segment", "outcome"],
+        },
+        encoder=RandomForestPathEncoder(n_estimators=5, embedding_dim=3, random_state=21),
+        decoder=MixedFeatureDecoder.random_forest(n_estimators=5, random_state=21),
+        classification_calibration="isotonic",
+        n_bootstrap=3,
+        random_state=21,
+    ).fit(df)
+
+    conf = model.confidence(df.head(8), columns=["outcome"])
+    report = model.calibration_report()
+
+    assert "outcome" in model.classification_calibrators_
+    assert report.loc[report["column"].eq("outcome"), "status"].iat[0] == "fitted"
+    assert conf["probabilities"].map(lambda probs: abs(sum(probs.values()) - 1.0) < 1e-8).all()
+
+
+def test_conformal_regression_calibration_adds_ordered_intervals():
+    df = make_frame(n=70)
+    model = MIMIC(
+        columns={
+            "ignore": ["id"],
+            "regression": ["age", "income"],
+            "classification": ["segment", "outcome"],
+        },
+        encoder=RandomForestPathEncoder(n_estimators=5, embedding_dim=3, random_state=22),
+        decoder=MixedFeatureDecoder.random_forest(n_estimators=5, random_state=22),
+        regression_calibration="conformal",
+        calibration_interval_levels=(0.8, 0.9),
+        n_bootstrap=3,
+        random_state=22,
+    ).fit(df)
+
+    conf = model.confidence(df.head(8), columns=["age"])
+    report = model.calibration_report()
+
+    assert "age" in model.regression_calibrators_
+    assert report.loc[report["column"].eq("age"), "status"].iat[0] == "fitted"
+    assert {"lower_80", "upper_80", "lower_90", "upper_90"}.issubset(conf.columns)
+    assert (conf["lower_80"] <= conf["prediction"]).all()
+    assert (conf["prediction"] <= conf["upper_80"]).all()
+    assert ((conf["upper_90"] - conf["lower_90"]) >= (conf["upper_80"] - conf["lower_80"])).all()
+
+
+def test_calibration_report_records_skipped_columns_when_oob_insufficient():
+    df = make_frame(n=6)
+    model = MIMIC(
+        columns={
+            "ignore": ["id"],
+            "regression": ["age", "income"],
+            "classification": ["segment", "outcome"],
+        },
+        mode="identity",
+        classification_calibration="temperature",
+        regression_calibration="conformal",
+        n_bootstrap=1,
+        random_state=23,
+    ).fit(df)
+
+    report = model.calibration_report()
+
+    assert not report.empty
+    assert set(report["status"]).issubset({"fitted", "skipped_insufficient_oob"})
+
+
 def test_verbose_false_is_silent_by_default(capsys):
     df = pd.DataFrame(
         {

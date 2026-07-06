@@ -13,6 +13,7 @@ from scipy import sparse
 from sklearn.base import BaseEstimator, TransformerMixin, clone
 from sklearn.impute import SimpleImputer
 from sklearn.metrics import pairwise_distances
+from sklearn.isotonic import IsotonicRegression
 from sklearn.neighbors import NearestNeighbors
 from sklearn.preprocessing import LabelEncoder, OneHotEncoder, StandardScaler
 from sklearn.utils.validation import check_is_fitted
@@ -216,6 +217,9 @@ class MIMIC(BaseEstimator, TransformerMixin):
         random_state: int | None = None,
         n_jobs: int | None = None,
         verbose: bool = False,
+        classification_calibration: str = "none",
+        regression_calibration: str = "none",
+        calibration_interval_levels: tuple[float, ...] = (0.8, 0.9, 0.95),
     ):
         self.columns = columns
         self.encoder = encoder
@@ -229,6 +233,9 @@ class MIMIC(BaseEstimator, TransformerMixin):
         self.random_state = random_state
         self.n_jobs = n_jobs
         self.verbose = verbose
+        self.classification_calibration = classification_calibration
+        self.regression_calibration = regression_calibration
+        self.calibration_interval_levels = calibration_interval_levels
         if self.verbose:
             self._verbose_init()
 
@@ -242,6 +249,10 @@ class MIMIC(BaseEstimator, TransformerMixin):
         self.train_index_ = X.index.copy()
         self.input_dtypes_ = X.dtypes.to_dict()
         self.feature_modules_ = {}
+        self.classification_calibrators_ = {}
+        self.regression_calibrators_ = {}
+        self.calibration_scores_ = []
+        oob_calibration_data = {}
         for column in self.model_columns_:
             task = self._task_for(column)
             observed_mask = X[column].notna()
@@ -280,6 +291,10 @@ class MIMIC(BaseEstimator, TransformerMixin):
 
             members = []
             oob_errors = []
+            oob_regression_predictions = []
+            oob_regression_true = []
+            oob_class_probabilities = []
+            oob_class_true = []
             for b in range(self.n_bootstrap_):
                 sample_pos = rng.choice(np.arange(len(observed_indices)), size=len(observed_indices), replace=True)
                 sample_rows = observed_indices[sample_pos]
@@ -313,6 +328,16 @@ class MIMIC(BaseEstimator, TransformerMixin):
                         true_raw = self._inverse_regression_target(y_full[oob_source].astype(float), target_scaler)
                         err = pred_raw - true_raw
                         oob_errors.extend(err.tolist())
+                        oob_regression_predictions.extend(pred_raw.tolist())
+                        oob_regression_true.extend(true_raw.tolist())
+                    else:
+                        p = self._align_proba_to_classes(
+                            decoder.predict_proba_target(column, H_oob),
+                            decoder.models_[column],
+                            len(classes),
+                        )
+                        oob_class_probabilities.append(p)
+                        oob_class_true.extend(y_full[oob_source].astype(int).tolist())
 
             bias = float(np.mean(oob_errors)) if oob_errors else 0.0
             noise = float(np.var(oob_errors, ddof=1)) if len(oob_errors) > 1 else 0.0
@@ -329,9 +354,22 @@ class MIMIC(BaseEstimator, TransformerMixin):
                 noise=noise,
                 classes_=classes,
             )
+            if task == "regression":
+                oob_calibration_data[column] = {
+                    "task": task,
+                    "predictions": np.asarray(oob_regression_predictions, dtype=float),
+                    "true": np.asarray(oob_regression_true, dtype=float),
+                }
+            else:
+                oob_calibration_data[column] = {
+                    "task": task,
+                    "probabilities": np.vstack(oob_class_probabilities) if oob_class_probabilities else np.empty((0, len(classes))),
+                    "true": np.asarray(oob_class_true, dtype=int),
+                }
 
         self.train_embeddings_ = self.transform(X)
         self.embedding_slices_ = self._embedding_slices_
+        self._fit_calibrators(oob_calibration_data)
         self._fit_conditional_samplers()
         if self.generation_decode_mode_config_ == "joint":
             self._fit_joint_decoder()
@@ -414,8 +452,15 @@ class MIMIC(BaseEstimator, TransformerMixin):
                     "second_class": details.get("second_class", [None] * len(X))[i],
                     "noise": module.noise if module.task == "regression" else np.nan,
                 }
+                intervals = details.get("intervals", {})
+                for name, values in intervals.items():
+                    base[name] = values[i]
                 rows.append(base)
         return pd.DataFrame(rows)
+
+    def calibration_report(self):
+        check_is_fitted(self, "calibration_scores_")
+        return pd.DataFrame(self.calibration_scores_)
 
     def sample(self, n_samples: int, condition=None, return_trace: bool = False, privacy_filter=None):
         check_is_fitted(self, "train_embeddings_")
@@ -714,6 +759,13 @@ class MIMIC(BaseEstimator, TransformerMixin):
                 "variance": variance,
                 "uncertainty": variance + (module.noise or 0.0),
             }
+            if column in getattr(self, "regression_calibrators_", {}):
+                intervals = {}
+                for level, quantile in self.regression_calibrators_[column]["quantiles"].items():
+                    suffix = self._interval_suffix(level)
+                    intervals[f"lower_{suffix}"] = mean - quantile
+                    intervals[f"upper_{suffix}"] = mean + quantile
+                details["intervals"] = intervals
             return mean, details
 
         probas = []
@@ -725,6 +777,7 @@ class MIMIC(BaseEstimator, TransformerMixin):
             votes.append(np.argmax(p, axis=1))
         p_arr = np.stack(probas, axis=0)
         p_mean = p_arr.mean(axis=0)
+        p_mean = self._apply_classification_calibrator(column, p_mean)
         pred_codes = np.argmax(p_mean, axis=1)
         pred_labels = module.label_encoder.inverse_transform(pred_codes)
         pred_probs = p_mean[np.arange(len(X)), pred_codes]
@@ -766,6 +819,144 @@ class MIMIC(BaseEstimator, TransformerMixin):
             "second_class": second_class,
         }
         return pred_labels, details
+
+    def _fit_calibrators(self, oob_calibration_data):
+        self.classification_calibrators_ = {}
+        self.regression_calibrators_ = {}
+        self.calibration_scores_ = []
+        for column, data in oob_calibration_data.items():
+            if data["task"] == "classification":
+                self._fit_classification_calibrator(column, data)
+            else:
+                self._fit_regression_calibrator(column, data)
+
+    def _fit_classification_calibrator(self, column, data):
+        method = self.classification_calibration
+        if method == "none":
+            return
+        probabilities = np.asarray(data["probabilities"], dtype=float)
+        y_true = np.asarray(data["true"], dtype=int)
+        n_samples = len(y_true)
+        module = self.feature_modules_[column]
+        if n_samples < max(5, len(module.classes_)):
+            self.calibration_scores_.append(
+                {"column": column, "task": "classification", "method": method, "status": "skipped_insufficient_oob", "n_oob": n_samples}
+            )
+            return
+        if method == "temperature":
+            temperature = self._fit_temperature(probabilities, y_true)
+            calibrated = self._temperature_calibrate(probabilities, temperature)
+            self.classification_calibrators_[column] = {"method": method, "temperature": temperature}
+        else:
+            calibrators = []
+            calibrated_columns = []
+            for class_idx in range(probabilities.shape[1]):
+                iso = IsotonicRegression(out_of_bounds="clip")
+                y_binary = (y_true == class_idx).astype(float)
+                if np.unique(y_binary).size < 2:
+                    calibrators.append(None)
+                    calibrated_columns.append(probabilities[:, class_idx])
+                    continue
+                iso.fit(probabilities[:, class_idx], y_binary)
+                calibrators.append(iso)
+                calibrated_columns.append(iso.predict(probabilities[:, class_idx]))
+            calibrated = self._normalize_probabilities(np.vstack(calibrated_columns).T)
+            self.classification_calibrators_[column] = {"method": method, "calibrators": calibrators}
+        self.calibration_scores_.append(
+            {
+                "column": column,
+                "task": "classification",
+                "method": method,
+                "status": "fitted",
+                "n_oob": n_samples,
+                "brier_before": self._multiclass_brier(probabilities, y_true),
+                "brier_after": self._multiclass_brier(calibrated, y_true),
+                "nll_before": self._multiclass_nll(probabilities, y_true),
+                "nll_after": self._multiclass_nll(calibrated, y_true),
+            }
+        )
+
+    def _fit_regression_calibrator(self, column, data):
+        method = self.regression_calibration
+        if method == "none":
+            return
+        predictions = np.asarray(data["predictions"], dtype=float)
+        y_true = np.asarray(data["true"], dtype=float)
+        n_samples = len(y_true)
+        if n_samples < 2:
+            self.calibration_scores_.append(
+                {"column": column, "task": "regression", "method": method, "status": "skipped_insufficient_oob", "n_oob": n_samples}
+            )
+            return
+        residuals = np.abs(predictions - y_true)
+        quantiles = {}
+        for level in self.calibration_interval_levels_:
+            quantiles[float(level)] = float(np.quantile(residuals, float(level), method="higher"))
+        self.regression_calibrators_[column] = {"method": method, "quantiles": quantiles}
+        self.calibration_scores_.append(
+            {
+                "column": column,
+                "task": "regression",
+                "method": method,
+                "status": "fitted",
+                "n_oob": n_samples,
+                "mean_absolute_oob_residual": float(np.mean(residuals)),
+            }
+        )
+
+    def _apply_classification_calibrator(self, column, probabilities):
+        calibrator = getattr(self, "classification_calibrators_", {}).get(column)
+        if calibrator is None:
+            return probabilities
+        if calibrator["method"] == "temperature":
+            return self._temperature_calibrate(probabilities, calibrator["temperature"])
+        calibrated_columns = []
+        for class_idx, iso in enumerate(calibrator["calibrators"]):
+            if iso is None:
+                calibrated_columns.append(probabilities[:, class_idx])
+            else:
+                calibrated_columns.append(iso.predict(probabilities[:, class_idx]))
+        return self._normalize_probabilities(np.vstack(calibrated_columns).T)
+
+    @staticmethod
+    def _fit_temperature(probabilities, y_true):
+        grid = np.exp(np.linspace(np.log(0.25), np.log(8.0), 40))
+        scores = [MIMIC._multiclass_nll(MIMIC._temperature_calibrate(probabilities, t), y_true) for t in grid]
+        return float(grid[int(np.argmin(scores))])
+
+    @staticmethod
+    def _temperature_calibrate(probabilities, temperature):
+        clipped = np.clip(np.asarray(probabilities, dtype=float), 1e-12, 1.0)
+        logits = np.log(clipped)
+        logits = logits / max(float(temperature), 1e-12)
+        logits = logits - logits.max(axis=1, keepdims=True)
+        exp_logits = np.exp(logits)
+        return MIMIC._normalize_probabilities(exp_logits)
+
+    @staticmethod
+    def _normalize_probabilities(probabilities):
+        arr = np.clip(np.asarray(probabilities, dtype=float), 0.0, np.inf)
+        row_sums = arr.sum(axis=1, keepdims=True)
+        missing = row_sums.ravel() <= 0
+        if np.any(missing):
+            arr[missing, :] = 1.0
+            row_sums = arr.sum(axis=1, keepdims=True)
+        return arr / row_sums
+
+    @staticmethod
+    def _multiclass_nll(probabilities, y_true):
+        p = np.clip(probabilities[np.arange(len(y_true)), y_true], 1e-12, 1.0)
+        return float(-np.mean(np.log(p)))
+
+    @staticmethod
+    def _multiclass_brier(probabilities, y_true):
+        y = np.zeros_like(probabilities, dtype=float)
+        y[np.arange(len(y_true)), y_true] = 1.0
+        return float(np.mean(np.sum(np.square(probabilities - y), axis=1)))
+
+    @staticmethod
+    def _interval_suffix(level):
+        return str(int(round(float(level) * 100)))
 
     def _member_embedding(
         self,
@@ -956,8 +1147,11 @@ class MIMIC(BaseEstimator, TransformerMixin):
     def _aligned_predict_proba(self, member: BootstrapMember, module: FeatureModule, column: str, H):
         proba = member.decoder.predict_proba_target(column, H)
         model = member.decoder.models_[column]
+        return self._align_proba_to_classes(proba, model, len(module.classes_))
+
+    @staticmethod
+    def _align_proba_to_classes(proba, model, n_classes: int):
         model_classes = getattr(model, "classes_", np.arange(proba.shape[1]))
-        n_classes = len(module.classes_)
         if len(model_classes) == n_classes and np.array_equal(model_classes, np.arange(n_classes)):
             return proba
         aligned = np.zeros((proba.shape[0], n_classes), dtype=float)
@@ -1113,6 +1307,7 @@ class MIMIC(BaseEstimator, TransformerMixin):
         return deepcopy(self.policy_config_)
 
     def _resolve_mode_configuration(self):
+        self._validate_calibration_configuration()
         mode_name = self._resolve_mode_name()
         capacity = self._validate_capacity(self.capacity)
         preset_params = self._capacity_parameters(capacity)
@@ -1194,6 +1389,19 @@ class MIMIC(BaseEstimator, TransformerMixin):
         if not 0.0 <= value <= 1.0:
             raise ValueError("capacity must be between 0 and 1")
         return value
+
+    def _validate_calibration_configuration(self):
+        if self.classification_calibration not in {"none", "temperature", "isotonic"}:
+            raise ValueError("classification_calibration must be one of 'none', 'temperature', or 'isotonic'")
+        if self.regression_calibration not in {"none", "conformal"}:
+            raise ValueError("regression_calibration must be one of 'none' or 'conformal'")
+        try:
+            levels = tuple(float(level) for level in self.calibration_interval_levels)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("calibration_interval_levels must contain values between 0 and 1") from exc
+        if not levels or any(level <= 0.0 or level >= 1.0 for level in levels):
+            raise ValueError("calibration_interval_levels must contain values strictly between 0 and 1")
+        self.calibration_interval_levels_ = levels
 
     @classmethod
     def _capacity_parameters(cls, capacity: float):
