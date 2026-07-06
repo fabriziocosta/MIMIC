@@ -173,6 +173,8 @@ def plot_feature_embedding_grid(
     random_state=None,
     point_size: int = 12,
     alpha: float = 0.75,
+    max_legend_labels: int = 6,
+    size: tuple[float, float] = (5, 5),
 ):
     """Plot one 2D projection per feature embedding, coloured by that feature's raw value."""
 
@@ -183,7 +185,13 @@ def plot_feature_embedding_grid(
     H = model.transform(df)
     n_cols = max(1, int(n_cols))
     n_rows = int(np.ceil(len(columns) / n_cols))
-    fig, axes = plt.subplots(n_rows, n_cols, figsize=(3.0 * n_cols, 2.7 * n_rows), squeeze=False)
+    panel_width, panel_height = size
+    fig, axes = plt.subplots(
+        n_rows,
+        n_cols,
+        figsize=(panel_width * n_cols, panel_height * n_rows),
+        squeeze=False,
+    )
     flat_axes = axes.ravel()
 
     for ax, column in zip(flat_axes, columns):
@@ -206,31 +214,69 @@ def plot_feature_embedding_grid(
         else:
             labels = values.astype("object").where(values.notna(), "__missing__")
             codes, uniques = pd.factorize(labels)
+            cmap = plt.get_cmap("tab20", max(1, len(uniques)))
             ax.scatter(
                 coords["mds1"],
                 coords["mds2"],
                 c=codes,
                 s=point_size,
                 alpha=alpha,
-                cmap="tab20",
+                cmap=cmap,
+                vmin=-0.5,
+                vmax=max(0.5, len(uniques) - 0.5),
                 edgecolor="none",
             )
-            ax.text(
-                0.02,
-                0.02,
-                f"{len(uniques)} categories",
-                transform=ax.transAxes,
-                fontsize="x-small",
-                alpha=0.7,
-            )
+            legend_limit = max(0, int(max_legend_labels))
+            legend_labels = labels.value_counts().head(legend_limit).index
+            label_to_code = {label: i for i, label in enumerate(uniques)}
+            handles = [
+                plt.Line2D(
+                    [0],
+                    [0],
+                    marker="o",
+                    linestyle="",
+                    markersize=4,
+                    markerfacecolor=cmap(label_to_code[label]),
+                    markeredgecolor="none",
+                    label=str(label),
+                )
+                for label in legend_labels
+            ]
+            if len(uniques) > len(legend_labels):
+                handles.append(
+                    plt.Line2D(
+                        [0],
+                        [0],
+                        marker="o",
+                        linestyle="",
+                        markersize=4,
+                        markerfacecolor="none",
+                        markeredgecolor="none",
+                        label=f"+{len(uniques) - len(legend_labels)} more",
+                    )
+                )
+            if handles:
+                ax.legend(
+                    handles=handles,
+                    loc="upper center",
+                    bbox_to_anchor=(0.5, -0.015),
+                    ncol=min(2, max(1, len(handles))),
+                    frameon=False,
+                    fontsize="xx-small",
+                    handletextpad=0.2,
+                    columnspacing=0.45,
+                    labelspacing=0.12,
+                    borderaxespad=0.0,
+                )
         ax.set_title(column, fontsize="medium")
         ax.set_xticks([])
         ax.set_yticks([])
+        ax.set_box_aspect(1)
 
     for ax in flat_axes[len(columns) :]:
         ax.set_axis_off()
 
-    fig.tight_layout()
+    fig.subplots_adjust(left=0.025, right=0.985, top=0.94, bottom=0.035, wspace=0.16, hspace=0.42)
     return fig, axes
 
 
@@ -282,13 +328,15 @@ def pareto_feature_pair_report(
 
 
 def plot_pareto_feature_pairs(
+    model,
     df: pd.DataFrame,
     target: str,
     columns: list[str] | None = None,
     *,
     max_pairs: int = 6,
+    size: tuple[float, float] = (4, 4),
 ):
-    """Plot Pareto-optimal feature pairs coloured by the target column."""
+    """Plot Pareto-optimal feature-pair embeddings coloured by the target column."""
 
     report = pareto_feature_pair_report(df, target, columns=columns, max_pairs=max_pairs)
     front = report[report["pareto"]].head(max_pairs)
@@ -297,7 +345,13 @@ def plot_pareto_feature_pairs(
 
     n_cols = min(3, len(front))
     n_rows = int(np.ceil(len(front) / n_cols))
-    fig, axes = plt.subplots(n_rows, n_cols, figsize=(4.0 * n_cols, 3.4 * n_rows), squeeze=False)
+    panel_width, panel_height = size
+    fig, axes = plt.subplots(
+        n_rows,
+        n_cols,
+        figsize=(panel_width * n_cols, panel_height * n_rows),
+        squeeze=False,
+    )
     flat_axes = axes.ravel()
     target_values = df[target]
     target_is_numeric = pd.api.types.is_numeric_dtype(target_values)
@@ -307,29 +361,54 @@ def plot_pareto_feature_pairs(
     else:
         labels = target_values.astype("object").where(target_values.notna(), "__missing__")
         color_values, uniques = pd.factorize(labels)
+    H = model.transform(df)
 
     for ax, row in zip(flat_axes, front.itertuples(index=False)):
-        x = _plot_axis_values(df[row.feature_x])
-        y = _plot_axis_values(df[row.feature_y])
-        scatter = ax.scatter(x, y, c=color_values, cmap="viridis" if target_is_numeric else "tab10", s=16, alpha=0.72, edgecolor="none")
-        ax.set_xlabel(row.feature_x)
-        ax.set_ylabel(row.feature_y)
-        ax.set_title(f"target={row.target_association:.2f}, pair={row.pair_association:.2f}", fontsize="small")
-        if not pd.api.types.is_numeric_dtype(df[row.feature_x]):
-            ax.set_xticks(sorted(pd.unique(x)))
-        if not pd.api.types.is_numeric_dtype(df[row.feature_y]):
-            ax.set_yticks(sorted(pd.unique(y)))
+        for feature in [row.feature_x, row.feature_y]:
+            if feature not in model.embedding_slices_:
+                raise ValueError(f"Unknown embedding column {feature!r}")
+        left_slice = model.embedding_slices_[row.feature_x]
+        right_slice = model.embedding_slices_[row.feature_y]
+        pair_embedding = np.hstack([H[:, left_slice], H[:, right_slice]])
+        coords = classical_mds_2d(pair_embedding)
+        scatter = ax.scatter(
+            coords["mds1"],
+            coords["mds2"],
+            c=color_values,
+            cmap="viridis" if target_is_numeric else "tab10",
+            s=16,
+            alpha=0.72,
+            edgecolor="none",
+        )
+        ax.set_xlabel("pair embedding MDS 1")
+        ax.set_ylabel("pair embedding MDS 2")
+        ax.set_title(
+            f"{row.feature_x} + {row.feature_y}\n"
+            f"target={row.target_association:.2f}, pair={row.pair_association:.2f}",
+            fontsize="small",
+        )
+        ax.set_box_aspect(1)
 
     for ax in flat_axes[len(front) :]:
         ax.set_axis_off()
 
+    visible_axes = flat_axes[: len(front)]
     if target_is_numeric:
-        fig.colorbar(scatter, ax=flat_axes[: len(front)], label=target, fraction=0.025, pad=0.02)
+        fig.subplots_adjust(left=0.07, right=0.9, top=0.9, bottom=0.08, wspace=0.34, hspace=0.44)
+        fig.colorbar(scatter, ax=visible_axes.tolist(), label=target, fraction=0.035, pad=0.025, shrink=0.82)
     elif uniques is not None:
         handles = scatter.legend_elements()[0]
-        fig.legend(handles, [str(u) for u in uniques], title=target, loc="center right", frameon=False)
-        fig.subplots_adjust(right=0.86)
-    fig.tight_layout()
+        fig.legend(
+            handles,
+            [str(u) for u in uniques],
+            title=target,
+            loc="center right",
+            frameon=False,
+            fontsize="small",
+        )
+        fig.subplots_adjust(left=0.07, right=0.84, top=0.9, bottom=0.08, wspace=0.34, hspace=0.44)
+    else:
+        fig.subplots_adjust(left=0.07, right=0.96, top=0.9, bottom=0.08, wspace=0.34, hspace=0.44)
     return fig, axes, report
 
 

@@ -158,6 +158,21 @@ def test_pairwise_feature_plot_can_log1p_selected_features():
     assert grid.axes[1, 1].get_xlabel() == "log1p(capital-gain)"
 
 
+def test_pairwise_feature_plot_log1p_ignores_nonfinite_values():
+    original = pd.DataFrame({"age": [20, 30, 40], "capital-loss": [0, -1, 2000]})
+    generated = pd.DataFrame({"age": [25, 35, 45], "capital-loss": [0, -5, 1200]})
+
+    grid = pairwise_feature_plot(
+        original,
+        generated,
+        features=["age", "capital-loss"],
+        log1p_features=["capital-loss"],
+        max_rows_per_source=None,
+    )
+
+    assert grid.axes[1, 1].get_xlabel() == "log1p(capital-loss)"
+
+
 def test_categorical_feature_report_and_plot_compare_proportions():
     original = pd.DataFrame({"segment": ["a", "a", "b", "c"], "label": ["yes", "no", "yes", "yes"]})
     generated = pd.DataFrame({"segment": ["a", "b", "b", "b"], "label": ["yes", "no", "no", "yes"]})

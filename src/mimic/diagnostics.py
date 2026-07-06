@@ -81,8 +81,8 @@ def pairwise_feature_plot(
         for feature in features:
             if feature in log1p_set:
                 display_name = f"log1p({feature})"
-                original_plot[display_name] = np.log1p(pd.to_numeric(original_plot[feature], errors="coerce"))
-                generated_plot[display_name] = np.log1p(pd.to_numeric(generated_plot[feature], errors="coerce"))
+                original_plot[display_name] = _safe_log1p(original_plot[feature])
+                generated_plot[display_name] = _safe_log1p(generated_plot[feature])
                 original_plot = original_plot.drop(columns=[feature])
                 generated_plot = generated_plot.drop(columns=[feature])
                 display_features[display_features.index(feature)] = display_name
@@ -214,7 +214,7 @@ def _map_log1p_filled_histograms(grid, plot_data, features, labels, palette, max
             continue
         ax = base_ax.twinx()
         base_ax.set_yticks([])
-        values = pd.to_numeric(plot_data[feature], errors="coerce").dropna()
+        values = _finite_numeric(plot_data[feature])
         if values.empty:
             continue
         auto_bins = np.histogram_bin_edges(values.to_numpy(), bins="auto")
@@ -226,7 +226,7 @@ def _map_log1p_filled_histograms(grid, plot_data, features, labels, palette, max
             center = float(values.iloc[0])
             bins = np.array([center - 0.5, center + 0.5])
         for label in labels:
-            series = pd.to_numeric(plot_data.loc[plot_data["source"] == label, feature], errors="coerce").dropna()
+            series = _finite_numeric(plot_data.loc[plot_data["source"] == label, feature])
             counts, edges = np.histogram(series.to_numpy(), bins=bins)
             ax.bar(
                 edges[:-1],
@@ -240,6 +240,21 @@ def _map_log1p_filled_histograms(grid, plot_data, features, labels, palette, max
                 label=label,
             )
         ax.set_ylabel("log1p(count)")
+
+
+def _safe_log1p(values) -> pd.Series:
+    numeric = pd.to_numeric(values, errors="coerce")
+    arr = numeric.to_numpy(dtype=float)
+    transformed_arr = np.full(arr.shape, np.nan, dtype=float)
+    valid = arr > -1
+    transformed_arr[valid] = np.log1p(arr[valid])
+    transformed = pd.Series(transformed_arr, index=numeric.index)
+    return transformed.replace([np.inf, -np.inf], np.nan)
+
+
+def _finite_numeric(values) -> pd.Series:
+    numeric = pd.to_numeric(values, errors="coerce").replace([np.inf, -np.inf], np.nan).dropna()
+    return numeric[np.isfinite(numeric)]
 
 
 def binary_classification_diagnostics(
