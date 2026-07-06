@@ -6,12 +6,17 @@ from mimic_experiments.q1_smote_roc import (
     _emit_progress,
     _effective_worker_count,
     _load_satimage,
+    _summarize_paper_sampling_point,
+    apply_majority_under_sampling,
+    evaluate_paper_fold,
     fit_mimic_model,
     fold_indices,
     format_seconds,
+    generated_count_for_smote_percent,
     generated_count_for_fraction,
     infer_mimic_columns,
     load_q1_result_tables,
+    majority_count_for_under_sampling,
     manuscript_result_row,
     maybe_subsample,
     model_cache_path,
@@ -113,6 +118,30 @@ def test_generated_count_for_fraction_uses_training_deficit():
     assert generated_count_for_fraction(train, 1.0) == 4
 
 
+def test_generated_count_for_smote_percent_uses_minority_count():
+    train = pd.DataFrame({"label": ["majority"] * 7 + ["minority"] * 3})
+
+    assert generated_count_for_smote_percent(train, 50) == 2
+    assert generated_count_for_smote_percent(train, 100) == 3
+    assert generated_count_for_smote_percent(train, 200) == 6
+
+
+def test_majority_count_for_under_sampling_matches_paper_definition():
+    train = pd.DataFrame({"label": ["majority"] * 20 + ["minority"] * 10})
+
+    assert majority_count_for_under_sampling(train, 50) == 20
+    assert majority_count_for_under_sampling(train, 100) == 10
+    assert majority_count_for_under_sampling(train, 200) == 5
+
+
+def test_apply_majority_under_sampling_keeps_all_minority_and_samples_majority():
+    train = pd.DataFrame({"x": range(30), "label": ["majority"] * 20 + ["minority"] * 10})
+
+    sampled = apply_majority_under_sampling(train, under_sampling_percent=200, random_state=0)
+
+    assert sampled["label"].value_counts().to_dict() == {"minority": 10, "majority": 5}
+
+
 def test_infer_mimic_columns_keeps_label_as_classification():
     frame = pd.DataFrame({"age": [1.0, 2.0], "segment": ["a", "b"], "label": ["majority", "minority"]})
 
@@ -127,6 +156,15 @@ def test_roc_curve_points_adds_endpoints():
     curve = roc_curve_points(points)
 
     assert curve[["mean_fpr", "mean_tpr"]].to_numpy().tolist() == [[0.0, 0.0], [0.2, 0.8], [1.0, 1.0]]
+
+
+def test_roc_curve_points_supports_paper_under_sampling_points():
+    points = pd.DataFrame({"mean_fpr": [0.2], "mean_tpr": [0.8], "under_sampling_percent": [100]})
+
+    curve = roc_curve_points(points)
+
+    assert curve[["mean_fpr", "mean_tpr"]].to_numpy().tolist() == [[0.0, 0.0], [0.2, 0.8], [1.0, 1.0]]
+    assert "under_sampling_percent" in curve.columns
 
 
 def test_plot_q1_roc_sweep_returns_configured_figure():
@@ -284,6 +322,72 @@ def test_summarize_sampling_point_aggregates_fold_results():
     assert summary["mean_generated"] == 5
     assert summary["folds"] == 2
     assert summary["model_cache_hits"] == 1
+
+
+def test_summarize_paper_sampling_point_aggregates_fold_results():
+    fold_results = pd.DataFrame(
+        {
+            "smote_percent": [100, 100, 100],
+            "under_sampling_percent": [100, 100, 200],
+            "fpr": [0.1, 0.3, 0.4],
+            "tpr": [0.6, 0.8, 0.9],
+            "roc_auc_score": [0.7, 0.9, 0.8],
+            "n_generated": [4, 6, 10],
+            "n_sampled_majority": [8, 10, 5],
+            "n_sampled_minority": [8, 10, 10],
+            "model_cache_hit": [False, True, True],
+        }
+    )
+
+    summary = _summarize_paper_sampling_point(fold_results, 100)
+
+    assert summary["smote_percent"] == 100
+    assert summary["mean_fpr"] == 0.2
+    assert summary["mean_tpr"] == 0.7
+    assert summary["mean_fold_auc"] == 0.8
+    assert summary["mean_generated"] == 5
+    assert summary["mean_sampled_majority"] == 9
+    assert summary["mean_sampled_minority"] == 9
+    assert summary["folds"] == 2
+    assert summary["model_cache_hits"] == 1
+
+
+def test_evaluate_paper_fold_uses_fixed_smote_and_under_sampling(monkeypatch):
+    class DummyMIMIC:
+        def sample(self, n, condition=None, return_trace=False):
+            synthetic = pd.DataFrame({"x": np.linspace(0.2, 0.8, n), "label": ["minority"] * n})
+            trace = pd.DataFrame({"row": range(n)})
+            return synthetic, trace
+
+    monkeypatch.setattr(
+        "mimic_experiments.q1_smote_roc.load_or_fit_mimic_model",
+        lambda *args, **kwargs: (DummyMIMIC(), "cache.joblib", False),
+    )
+    frame = pd.DataFrame(
+        {
+            "x": np.r_[np.linspace(0, 1, 20), np.linspace(1, 2, 10)],
+            "label": ["majority"] * 20 + ["minority"] * 10,
+        }
+    )
+    config = Q1Config(
+        protocol="paper_under_sampling",
+        smote_percent=100,
+        under_sampling_percentages=(100, 200),
+        cache_models=False,
+    )
+
+    result = evaluate_paper_fold(
+        frame,
+        train_idx=np.array([*range(16), *range(20, 28)]),
+        test_idx=np.array([16, 17, 18, 19, 28, 29]),
+        fold=1,
+        config=config,
+    )
+
+    assert result["under_sampling_percent"].tolist() == [100, 200]
+    assert result["n_generated"].tolist() == [8, 8]
+    assert result["n_sampled_minority"].tolist() == [16, 16]
+    assert result["n_sampled_majority"].tolist() == [16, 8]
 
 
 def test_emit_progress_builds_eta_event():

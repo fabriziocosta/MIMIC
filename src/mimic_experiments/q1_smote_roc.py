@@ -55,9 +55,12 @@ class Q1Config:
     dataset_key: str = "adult_mixed"
     run_profile: str = "run_full"
     random_state: int = 0
+    protocol: str = "deficit_sweep"
     mimic_mode: str = "factorised"
     mimic_capacity_run_full: float = 0.25
     deficit_fractions: tuple[float, ...] = (0.0, 0.25, 0.5, 0.75, 1.0)
+    smote_percent: int = 100
+    under_sampling_percentages: tuple[int, ...] = (50, 100, 200, 300, 400, 500)
     n_jobs: int = 1
     artifact_dir: str | None = None
     cache_models: bool = True
@@ -92,13 +95,20 @@ class Q1Config:
     def should_run_experiment(self) -> bool:
         return self.run_profile != "view"
 
+    @property
+    def is_paper_protocol(self) -> bool:
+        return self.protocol == "paper_under_sampling"
+
 
 def q1_dataset_registry(
     *,
     artifact_dir: str | Path | None = None,
     run_profile: str = "run_full",
+    protocol: str = "deficit_sweep",
     mimic_mode: str = "factorised",
     mimic_capacity: float = 0.25,
+    smote_percent: int = 100,
+    under_sampling_percentages: tuple[int, ...] = (50, 100, 200, 300, 400, 500),
     policy: GenerationPolicy | None = None,
     random_state: int = 0,
 ) -> pd.DataFrame:
@@ -157,8 +167,11 @@ def q1_dataset_registry(
             key,
             artifact_dir=artifact_dir,
             run_profile=run_profile,
+            protocol=protocol,
             mimic_mode=mimic_mode,
             mimic_capacity=mimic_capacity,
+            smote_percent=smote_percent,
+            under_sampling_percentages=under_sampling_percentages,
             policy=policy,
             random_state=random_state,
         )
@@ -221,6 +234,43 @@ def generated_count_for_fraction(train: pd.DataFrame, fraction: float, target: s
     counts = train[target].value_counts()
     deficit = int(counts.get("majority", 0) - counts.get("minority", 0))
     return max(0, int(round(deficit * fraction)))
+
+
+def generated_count_for_smote_percent(train: pd.DataFrame, smote_percent: int, target: str = "label") -> int:
+    minority_count = int(train[target].eq("minority").sum())
+    return max(0, int(round(minority_count * smote_percent / 100)))
+
+
+def majority_count_for_under_sampling(
+    augmented_train: pd.DataFrame, under_sampling_percent: int, target: str = "label"
+) -> int:
+    if under_sampling_percent <= 0:
+        raise ValueError("under_sampling_percent must be positive")
+    minority_count = int(augmented_train[target].eq("minority").sum())
+    majority_available = int(augmented_train[target].eq("majority").sum())
+    requested = int(round(minority_count * 100 / under_sampling_percent))
+    return max(1, min(majority_available, requested))
+
+
+def apply_majority_under_sampling(
+    augmented_train: pd.DataFrame,
+    *,
+    under_sampling_percent: int,
+    random_state: int,
+    target: str = "label",
+) -> pd.DataFrame:
+    minority = augmented_train.loc[augmented_train[target].eq("minority")]
+    majority = augmented_train.loc[augmented_train[target].eq("majority")]
+    n_majority = majority_count_for_under_sampling(
+        augmented_train,
+        under_sampling_percent=under_sampling_percent,
+        target=target,
+    )
+    sampled_majority = majority.sample(n=n_majority, random_state=random_state, replace=False)
+    return pd.concat([minority, sampled_majority], ignore_index=True).sample(
+        frac=1.0,
+        random_state=random_state,
+    ).reset_index(drop=True)
 
 
 def fit_mimic_and_augment(
@@ -419,6 +469,78 @@ def evaluate_fold(
     return pd.DataFrame(rows)
 
 
+def evaluate_paper_fold(
+    frame: pd.DataFrame,
+    *,
+    train_idx,
+    test_idx,
+    fold: int,
+    config: Q1Config,
+    target: str = "label",
+) -> pd.DataFrame:
+    _configure_worker_threads(config.worker_threads)
+    train = frame.iloc[train_idx].reset_index(drop=True)
+    test = frame.iloc[test_idx].reset_index(drop=True)
+    n_generated = generated_count_for_smote_percent(train, config.smote_percent, target=target)
+    model = None
+    model_path = None
+    model_cache_hit = False
+    if n_generated > 0:
+        model, model_path, model_cache_hit = load_or_fit_mimic_model(
+            train,
+            config=config,
+            fold=fold,
+            train_idx=train_idx,
+            random_state=config.random_state + fold,
+        )
+    augmented, trace = fit_mimic_and_augment(
+        train,
+        n_generated,
+        config=config,
+        random_state=config.random_state + fold,
+        model=model,
+    )
+
+    rows = []
+    for under_sampling_percent in config.under_sampling_percentages:
+        sampled_train = apply_majority_under_sampling(
+            augmented,
+            under_sampling_percent=under_sampling_percent,
+            random_state=config.random_state + fold * 1000 + int(under_sampling_percent),
+            target=target,
+        )
+        classifier = make_classifier(sampled_train, random_state=config.random_state, target=target)
+        classifier.fit(sampled_train.drop(columns=[target]), sampled_train[target])
+        positive_class_index = list(classifier.classes_).index("minority")
+        scores = classifier.predict_proba(test.drop(columns=[target]))[:, positive_class_index]
+        y_true = test[target].eq("minority").astype(int).to_numpy()
+        y_pred = scores >= 0.5
+
+        fp = int(((y_pred == 1) & (y_true == 0)).sum())
+        tp = int(((y_pred == 1) & (y_true == 1)).sum())
+        fn = int(((y_pred == 0) & (y_true == 1)).sum())
+        tn = int(((y_pred == 0) & (y_true == 0)).sum())
+        rows.append(
+            {
+                "fold": fold,
+                "smote_percent": config.smote_percent,
+                "under_sampling_percent": under_sampling_percent,
+                "n_train": len(train),
+                "n_generated": n_generated,
+                "n_sampled_train": len(sampled_train),
+                "n_sampled_majority": int(sampled_train[target].eq("majority").sum()),
+                "n_sampled_minority": int(sampled_train[target].eq("minority").sum()),
+                "trace_rows": len(trace),
+                "fpr": fp / (fp + tn) if (fp + tn) else np.nan,
+                "tpr": tp / (tp + fn) if (tp + fn) else np.nan,
+                "roc_auc_score": roc_auc_score(y_true, scores),
+                "model_path": model_path,
+                "model_cache_hit": bool(model_cache_hit),
+            }
+        )
+    return pd.DataFrame(rows)
+
+
 def fold_indices(frame: pd.DataFrame, config: Q1Config, target: str = "label") -> list[tuple[int, np.ndarray, np.ndarray]]:
     splitter = StratifiedKFold(n_splits=config.n_splits, shuffle=True, random_state=config.random_state)
     X = frame.drop(columns=[target])
@@ -427,6 +549,9 @@ def fold_indices(frame: pd.DataFrame, config: Q1Config, target: str = "label") -
 
 
 def run_mimic_roc_sweep(frame: pd.DataFrame, config: Q1Config, progress=None) -> tuple[pd.DataFrame, pd.DataFrame]:
+    if config.is_paper_protocol:
+        return run_paper_under_sampling_sweep(frame, config, progress=progress)
+
     fold_results = run_q1_fold_jobs(frame, config, progress=progress)
     points = [_summarize_sampling_point(fold_results, fraction) for fraction in config.deficit_fractions]
     roc_points = pd.DataFrame(points).sort_values(["mean_fpr", "mean_tpr"]).reset_index(drop=True)
@@ -453,6 +578,41 @@ def run_mimic_roc_sweep(frame: pd.DataFrame, config: Q1Config, progress=None) ->
     return roc_points, summary
 
 
+def run_paper_under_sampling_sweep(
+    frame: pd.DataFrame, config: Q1Config, progress=None
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    fold_results = run_q1_fold_jobs(frame, config, progress=progress)
+    points = [
+        _summarize_paper_sampling_point(fold_results, under_sampling_percent)
+        for under_sampling_percent in config.under_sampling_percentages
+    ]
+    roc_points = pd.DataFrame(points).sort_values(["mean_fpr", "mean_tpr"]).reset_index(drop=True)
+    curve = roc_curve_points(roc_points)
+    summary = pd.DataFrame(
+        [
+            {
+                "dataset_key": config.dataset_key,
+                "run_profile": config.run_profile,
+                "protocol": config.protocol,
+                "n_rows": len(frame),
+                "n_splits": config.n_splits,
+                "n_jobs": config.n_jobs,
+                "mimic_mode": config.mimic_mode,
+                "mimic_capacity": config.mimic_capacity,
+                "smote_percent": config.smote_percent,
+                "under_sampling_percentages": ",".join(map(str, config.under_sampling_percentages)),
+                "artifact_dir": config.artifact_dir,
+                "roc_curve_auc": auc(curve["mean_fpr"], curve["mean_tpr"]),
+                "mean_fold_auc_at_balanced_under_sampling": roc_points.loc[
+                    roc_points["under_sampling_percent"].eq(100), "mean_fold_auc"
+                ].mean(),
+            }
+        ]
+    )
+    save_q1_result_tables(config, roc_points, summary)
+    return roc_points, summary
+
+
 def run_q1_fold_jobs(frame: pd.DataFrame, config: Q1Config, progress=None) -> pd.DataFrame:
     jobs = fold_indices(frame, config)
     total = len(jobs)
@@ -469,7 +629,8 @@ def run_q1_fold_jobs(frame: pd.DataFrame, config: Q1Config, progress=None) -> pd
     if config.n_jobs == 1:
         results = []
         for fold, train_idx, test_idx in jobs:
-            result = evaluate_fold(frame, train_idx=train_idx, test_idx=test_idx, fold=fold, config=config)
+            evaluator = evaluate_paper_fold if config.is_paper_protocol else evaluate_fold
+            result = evaluator(frame, train_idx=train_idx, test_idx=test_idx, fold=fold, config=config)
             results.append(result)
             progress_state["completed"] += 1
             _emit_progress(
@@ -481,8 +642,9 @@ def run_q1_fold_jobs(frame: pd.DataFrame, config: Q1Config, progress=None) -> pd
                 parallel_workers=parallel_workers,
             )
     else:
+        evaluator = evaluate_paper_fold if config.is_paper_protocol else evaluate_fold
         task_iter = (
-            delayed(evaluate_fold)(frame, train_idx=train_idx, test_idx=test_idx, fold=fold, config=config)
+            delayed(evaluator)(frame, train_idx=train_idx, test_idx=test_idx, fold=fold, config=config)
             for fold, train_idx, test_idx in jobs
         )
         try:
@@ -502,7 +664,7 @@ def run_q1_fold_jobs(frame: pd.DataFrame, config: Q1Config, progress=None) -> pd
                 )
         except TypeError:
             task_iter = (
-                delayed(evaluate_fold)(frame, train_idx=train_idx, test_idx=test_idx, fold=fold, config=config)
+                delayed(evaluator)(frame, train_idx=train_idx, test_idx=test_idx, fold=fold, config=config)
                 for fold, train_idx, test_idx in jobs
             )
             results = Parallel(n_jobs=config.n_jobs)(task_iter)
@@ -518,11 +680,12 @@ def run_q1_fold_jobs(frame: pd.DataFrame, config: Q1Config, progress=None) -> pd
 
 
 def roc_curve_points(roc_points: pd.DataFrame) -> pd.DataFrame:
+    label_column = "deficit_fraction" if "deficit_fraction" in roc_points.columns else "under_sampling_percent"
     return pd.concat(
         [
-            pd.DataFrame([{"mean_fpr": 0.0, "mean_tpr": 0.0, "deficit_fraction": np.nan}]),
-            roc_points[["mean_fpr", "mean_tpr", "deficit_fraction"]],
-            pd.DataFrame([{"mean_fpr": 1.0, "mean_tpr": 1.0, "deficit_fraction": np.nan}]),
+            pd.DataFrame([{"mean_fpr": 0.0, "mean_tpr": 0.0, label_column: np.nan}]),
+            roc_points[["mean_fpr", "mean_tpr", label_column]],
+            pd.DataFrame([{"mean_fpr": 1.0, "mean_tpr": 1.0, label_column: np.nan}]),
         ],
         ignore_index=True,
     ).sort_values(["mean_fpr", "mean_tpr"]).reset_index(drop=True)
@@ -535,12 +698,14 @@ def plot_q1_roc_sweep(
     figsize: tuple[float, float] = (5.5, 5.0),
 ):
     curve = roc_curve_points(roc_points)
+    label_column = "deficit_fraction" if "deficit_fraction" in roc_points.columns else "under_sampling_percent"
     fig, ax = plt.subplots(figsize=figsize)
     ax.plot(curve["mean_fpr"], curve["mean_tpr"], marker="o", linewidth=2, label="MIMIC ROC sweep")
     ax.plot([0, 1], [0, 1], linestyle="--", color="black", alpha=0.55)
     for _, row in roc_points.iterrows():
+        label = f"{row[label_column]:.2g}" if label_column == "deficit_fraction" else f"{int(row[label_column])}%"
         ax.annotate(
-            f"{row['deficit_fraction']:.2g}",
+            label,
             (row["mean_fpr"], row["mean_tpr"]),
             textcoords="offset points",
             xytext=(5, 5),
@@ -565,7 +730,11 @@ def manuscript_result_row(config: Q1Config, summary: pd.DataFrame) -> pd.DataFra
                 "published_smote_reference": "SMOTE paper ROC/AUC target",
                 "mimic_auc": summary.loc[0, "roc_curve_auc"],
                 "mimic_roc_hull_status": "pending hull comparison",
-                "protocol_note": "protocol-aligned, classifier-substituted",
+                "protocol_note": (
+                    "paper under-sampling sweep, classifier-substituted"
+                    if config.is_paper_protocol
+                    else "protocol-aligned, classifier-substituted"
+                ),
             }
         ]
     )
@@ -625,8 +794,11 @@ def _experiment_status(
     *,
     artifact_dir: str | Path | None,
     run_profile: str,
+    protocol: str,
     mimic_mode: str,
     mimic_capacity: float,
+    smote_percent: int,
+    under_sampling_percentages: tuple[int, ...],
     policy: GenerationPolicy | None,
     random_state: int,
 ) -> str:
@@ -641,9 +813,13 @@ def _experiment_status(
     )
     saved_profile = "run_full" if run_profile == "view" else run_profile
     expected_folds = 10
+    protocol_part = "" if protocol == "deficit_sweep" else f"{_safe_name(protocol)}__"
+    paper_part = ""
+    if protocol == "paper_under_sampling":
+        paper_part = f"smote-{smote_percent}__under-{'-'.join(map(str, under_sampling_percentages))}__"
     stem = (
-        f"{_safe_name(dataset_key)}__{_safe_name(saved_profile)}__"
-        f"{_safe_name(mimic_mode)}__cap-{mimic_capacity:g}__"
+        f"{_safe_name(dataset_key)}__{_safe_name(saved_profile)}__{protocol_part}"
+        f"{_safe_name(mimic_mode)}__cap-{mimic_capacity:g}__{paper_part}"
         f"{_safe_name(selected_policy.method)}-{_safe_name(selected_policy.neighbour_mode)}-"
         f"k{selected_policy.n_neighbors}__seed-{random_state}"
     )
@@ -714,6 +890,22 @@ def _summarize_sampling_point(fold_results: pd.DataFrame, deficit_fraction: floa
     }
 
 
+def _summarize_paper_sampling_point(fold_results: pd.DataFrame, under_sampling_percent: int) -> dict[str, float]:
+    selected = fold_results.loc[fold_results["under_sampling_percent"].eq(under_sampling_percent)]
+    return {
+        "smote_percent": int(selected["smote_percent"].iloc[0]) if not selected.empty else np.nan,
+        "under_sampling_percent": under_sampling_percent,
+        "mean_fpr": selected["fpr"].mean(),
+        "mean_tpr": selected["tpr"].mean(),
+        "mean_fold_auc": selected["roc_auc_score"].mean(),
+        "mean_generated": selected["n_generated"].mean(),
+        "mean_sampled_majority": selected["n_sampled_majority"].mean(),
+        "mean_sampled_minority": selected["n_sampled_minority"].mean(),
+        "folds": len(selected),
+        "model_cache_hits": int(selected["model_cache_hit"].sum()),
+    }
+
+
 def _clean_column_name(column, index: int) -> str:
     name = str(column).strip().replace(" ", "_").replace("-", "_")
     return name if name else f"x{index}"
@@ -732,9 +924,14 @@ def _index_hash(indices) -> str:
 
 def _config_artifact_stem(config: Q1Config) -> str:
     policy = config.policy
+    protocol = "" if config.protocol == "deficit_sweep" else f"{_safe_name(config.protocol)}__"
+    paper = ""
+    if config.is_paper_protocol:
+        paper = f"smote-{config.smote_percent}__under-{'-'.join(map(str, config.under_sampling_percentages))}__"
     return (
-        f"{_safe_name(config.dataset_key)}__{_safe_name(config.saves_as_profile)}__"
+        f"{_safe_name(config.dataset_key)}__{_safe_name(config.saves_as_profile)}__{protocol}"
         f"{_safe_name(config.mimic_mode)}__cap-{config.mimic_capacity:g}__"
+        f"{paper}"
         f"{_safe_name(policy.method)}-{_safe_name(policy.neighbour_mode)}-k{policy.n_neighbors}__"
         f"seed-{config.random_state}"
     )
