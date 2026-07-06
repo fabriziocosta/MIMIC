@@ -2,6 +2,8 @@ import matplotlib
 
 matplotlib.use("Agg")
 
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -18,10 +20,12 @@ from mimic import (
     NeuralConditionalSampler,
     RandomForestPathEncoder,
     ResNetEncoder,
+    mimic_data,
     sample,
     sample_dataframe,
 )
 from mimic.diagnostics import categorical_feature_plot, categorical_feature_report, pairwise_feature_plot
+from mimic.cli import _default_output_path, _parse_columns, main as mimic_cli_main
 from mimic.mimic import GlobalContextPreprocessor
 
 
@@ -486,7 +490,7 @@ def test_plot_can_select_embedding_columns_and_color_from_values():
         model.plot(df, embedding_columns=["not_a_column"])
 
 
-def test_sample_function_fits_and_generates_matching_dataframe():
+def test_mimic_data_function_fits_and_generates_matching_dataframe():
     df = pd.DataFrame(
         {
             "age": [30.5, 30.5, 42.0, 42.0, 51.5, 51.5, 63.0, 63.0],
@@ -494,8 +498,14 @@ def test_sample_function_fits_and_generates_matching_dataframe():
         }
     )
 
-    synthetic = sample(
+    synthetic = mimic_data(
         df,
+        mode="identity",
+        random_state=0,
+    )
+    sample_alias_synthetic = sample(
+        df,
+        n_samples=6,
         mode="identity",
         random_state=0,
     )
@@ -509,7 +519,56 @@ def test_sample_function_fits_and_generates_matching_dataframe():
     assert isinstance(synthetic, pd.DataFrame)
     assert synthetic.shape == df.shape
     assert list(synthetic.columns) == list(df.columns)
+    assert sample_alias_synthetic.shape == (6, df.shape[1])
     assert alias_synthetic.shape == (5, df.shape[1])
+
+
+def test_mimic_data_cli_defaults_to_mimic_suffix_for_csv(tmp_path):
+    df = pd.DataFrame(
+        {
+            "age": [30.5, 30.5, 42.0, 42.0, 51.5, 51.5, 63.0, 63.0],
+            "segment": ["younger", "younger", "younger", "older", "older", "older", "older", "younger"],
+        }
+    )
+    input_path = tmp_path / "adult.csv"
+    df.to_csv(input_path, index=False)
+
+    exit_code = mimic_cli_main(
+        [
+            str(input_path),
+            "--columns",
+            '{"regression":["age"],"classification":["segment"]}',
+            "--mode",
+            "identity",
+            "--random-state",
+            "0",
+        ]
+    )
+    output_path = tmp_path / "adult_mimic.csv"
+    generated = pd.read_csv(output_path)
+
+    assert exit_code == 0
+    assert output_path.exists()
+    assert generated.shape == df.shape
+    assert list(generated.columns) == list(df.columns)
+
+
+def test_mimic_data_cli_columns_can_be_read_from_json_file(tmp_path):
+    columns_path = tmp_path / "columns.json"
+    columns_path.write_text('{"regression":["age"],"classification":["segment"]}')
+
+    parser = __import__("mimic.cli", fromlist=["_build_parser"])._build_parser()
+
+    assert _parse_columns("auto", parser) == "auto"
+    assert _parse_columns(f"@{columns_path}", parser) == {
+        "regression": ["age"],
+        "classification": ["segment"],
+    }
+
+
+def test_mimic_data_cli_default_output_path_preserves_suffix():
+    assert _default_output_path(Path("data/adult.csv")) == Path("data/adult_mimic.csv")
+    assert _default_output_path(Path("adult.parquet")) == Path("adult_mimic.parquet")
 
 
 def test_verbose_false_is_silent_by_default(capsys):
@@ -554,19 +613,16 @@ def test_verbose_prints_hyperparameters_and_fitted_sizes(capsys):
     assert "    - x\n" in init_out
     assert "mode: direct" in init_out
     assert "capacity: 0.25" in init_out
-    assert "encoder:\n" in init_out
-    assert "class: ResNetEncoder" in init_out
-    assert "decoder:\n" in init_out
-    assert "class: NeuralConditionalSampler" in init_out
-    assert "policy:\n" in init_out
-    assert "class: GenerationPolicy" in init_out
-    assert "parameters:\n" in init_out
-    assert "embedding_dim:" in init_out
-    assert "hidden_dim:" in init_out
+    assert "encoder: None" in init_out
+    assert "decoder: None" in init_out
+    assert "policy: None" in init_out
+    assert "class: ResNetEncoder" not in init_out
+    assert "class: NeuralConditionalSampler" not in init_out
+    assert "class: GenerationPolicy" not in init_out
+    assert "capacity_parameters" not in init_out
     assert "generation_decode_mode: direct" in init_out
     assert "MIMIC resolved fit configuration:" in fit_out
-    assert "capacity_parameters_:\n" in fit_out
-    assert "  embedding_dim:" in fit_out
+    assert "capacity_parameters_" not in fit_out
     assert "n_bootstrap_:" in fit_out
     assert "encoder_:\n" in fit_out
     assert "class: ResNetEncoder" in fit_out
@@ -574,6 +630,9 @@ def test_verbose_prints_hyperparameters_and_fitted_sizes(capsys):
     assert "class: NeuralConditionalSampler" in fit_out
     assert "policy_config_:\n" in fit_out
     assert "class: GenerationPolicy" in fit_out
+    assert "parameters:\n" in fit_out
+    assert "embedding_dim:" in fit_out
+    assert "hidden_dim:" in fit_out
     assert "n_neighbors: 5" in fit_out
     assert "MIMIC fitted data sizes:" in fit_out
     assert "input_rows: 4" in fit_out

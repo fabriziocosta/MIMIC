@@ -17,6 +17,9 @@ dependencies = [
     "torch",
 ]
 
+[project.scripts]
+mimic-data = "mimic.cli:main"
+
 [project.optional-dependencies]
 dev = [
     "pytest",
@@ -31,4 +34,3 @@ where = ["src"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
-

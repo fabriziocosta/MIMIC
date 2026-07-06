@@ -33,14 +33,24 @@ task-specific pipelines.
 ## Quick Example
 
 ```python
-from mimic import sample
+from mimic import mimic_data
 
-synthetic = sample(df)
+synthetic = mimic_data(df)
 ```
 
-`sample(df)` fits a default `MIMIC` model internally and returns the same number
+`mimic_data(df)` fits a default `MIMIC` model internally and returns the same number
 of synthetic rows. It is the simplest interface when you only need a sampled
 dataframe.
+
+The same one-shot workflow is available from the command line:
+
+```bash
+mimic-data data.csv
+```
+
+This writes `data_mimic.csv` beside the input file. CSV, Parquet, and Excel
+inputs are supported. Optional flags include `--columns`, `--mode`, and
+`--capacity`; run `mimic-data --help` for details.
 
 Use the estimator directly when you want imputation, confidence diagnostics,
 traceability, or reusable fitted state:

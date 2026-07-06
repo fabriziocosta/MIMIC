@@ -1264,7 +1264,6 @@ class MIMIC(BaseEstimator, TransformerMixin):
         print(f"  mode_: {self.mode_}")
         print(f"  level_: {self.level_}")
         print(f"  capacity_: {self.capacity_}")
-        self._verbose_print_item("capacity_parameters_", self.capacity_parameters_)
         print(f"  n_bootstrap_: {self.n_bootstrap_}")
         print(f"  generation_decode_mode_config_: {self.generation_decode_mode_config_}")
         self._verbose_print_item("encoder_", self.encoder_)
@@ -1299,13 +1298,9 @@ class MIMIC(BaseEstimator, TransformerMixin):
             mode_name = self._resolve_mode_name()
             capacity = self._validate_capacity(self.capacity)
             preset_params = self._capacity_parameters(capacity)
-            preset_encoder, preset_decoder, preset_mode = self._preset_components(mode_name, preset_params)
+            _, _, preset_mode = self._preset_components(mode_name, preset_params)
             params["mode"] = mode_name
             params["capacity"] = capacity
-            params["capacity_parameters"] = preset_params
-            params["encoder"] = self.encoder if self.encoder is not None else preset_encoder
-            params["decoder"] = self.decoder if self.decoder is not None else preset_decoder
-            params["policy"] = self.policy if self.policy is not None else self._default_generation_policy()
             if self.generation_decode_mode == "auto" and mode_name is not None and self.decoder is None:
                 params["generation_decode_mode"] = preset_mode
             else:
@@ -1376,7 +1371,7 @@ class MIMIC(BaseEstimator, TransformerMixin):
         return {}
 
 
-def sample(df: pd.DataFrame, n_samples: int | None = None, **mimic_kwargs) -> pd.DataFrame:
+def mimic_data(df: pd.DataFrame, n_samples: int | None = None, **mimic_kwargs) -> pd.DataFrame:
     """Fit a default MIMIC model and return synthetic rows for ``df``.
 
     This is the smallest public interface for one-shot generation. By default
@@ -1390,4 +1385,5 @@ def sample(df: pd.DataFrame, n_samples: int | None = None, **mimic_kwargs) -> pd
     return model.sample(len(df) if n_samples is None else n_samples)
 
 
-sample_dataframe = sample
+sample = mimic_data
+sample_dataframe = mimic_data

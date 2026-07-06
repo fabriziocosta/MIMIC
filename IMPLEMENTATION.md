@@ -27,15 +27,25 @@ The implementation should follow scikit-learn conventions: constructor arguments
 ### 2.1 One-Shot Generation
 
 ```python
-from mimic import sample
+from mimic import mimic_data
 
-synthetic = sample(df)
+synthetic = mimic_data(df)
 ```
 
-The module-level `sample(df, n_samples=None, **mimic_kwargs)` helper fits
+The module-level `mimic_data(df, n_samples=None, **mimic_kwargs)` helper fits
 `MIMIC(**mimic_kwargs)` internally and returns `model.sample(len(df))` by
 default. It is a convenience API for users who only need a sampled dataframe.
-`sample_dataframe` is an alias with a more explicit name.
+`sample` and `sample_dataframe` remain compatibility aliases.
+
+The `mimic-data` CLI wraps the same helper for files:
+
+```bash
+mimic-data data.csv
+```
+
+It reads `.csv`, `.parquet`, `.xls`, or `.xlsx`, writes the same format to
+`<stem>_mimic<suffix>` by default, and exposes `--columns`, `--mode`, and
+`--capacity` options while keeping all defaults usable from only the filename.
 
 ### 2.2 Constructor
 
