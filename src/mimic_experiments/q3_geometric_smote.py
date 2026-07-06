@@ -510,7 +510,7 @@ def plot_q3_metric_comparison(manuscript_table: pd.DataFrame, *, classifier: str
     ax.set_title(f"Q3 {metric} comparison: {row['dataset']} / {classifier}")
     ax.set_xlabel("Method")
     ax.set_ylabel(metric)
-    ax.set_ylim(0, 1)
+    ax.autoscale(axis="y")
     ax.grid(axis="y", alpha=0.25)
     ax.tick_params(axis="x", rotation=25)
     fig.tight_layout()
