@@ -42,6 +42,15 @@ synthetic = mimic_data(df, mode="factorised", capacity=0.25)
 of synthetic rows. It is the simplest interface when you only need a sampled
 dataframe.
 
+Nearest-neighbor ambiguity filtering is available as an opt-in attribution-risk
+reduction step. It rejects generated embeddings that are too easily associated
+with one training row or generation pair; it is not a formal differential
+privacy guarantee.
+
+```python
+synthetic = mimic_data(df, privacy_filter=True)
+```
+
 The same one-shot workflow is available from the command line:
 
 ```bash

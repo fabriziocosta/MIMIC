@@ -37,6 +37,15 @@ The module-level `mimic_data(df, n_samples=None, mode="factorised", capacity=0.2
 default. It is a convenience API for users who only need a sampled dataframe.
 `sample` and `sample_dataframe` remain compatibility aliases.
 
+`privacy_filter=True` enables opt-in nearest-neighbor ambiguity filtering in
+embedding space. It rejects generated embeddings that lack enough similarly
+close non-source training neighbors. This reduces generation-pair attribution
+risk, but is not a formal differential privacy mechanism.
+
+```python
+synthetic = mimic_data(df, privacy_filter=True)
+```
+
 The `mimic-data` CLI wraps the same helper for files:
 
 ```bash
@@ -456,7 +465,7 @@ The method should:
 2. select neighbours according to the configured policy;
 3. generate synthetic embeddings;
 4. decode embeddings back into feature values according to `generation_decode_mode`;
-5. for factorised decoding, run Gibbs-style conditional sampling over decoded rows;
+5. for factorised decoding, run conditional feature-wise sampling passes over decoded rows;
 6. optionally return trace records for embedding generation and per-cell sampling.
 
 `generation_decode_mode` accepts `"auto"`, `"direct"`, `"factorised"`, and
@@ -600,9 +609,9 @@ Generation with this decoder proceeds in two stages when
 `generation_decode_mode` resolves to `"factorised"`:
 
 1. create an initial synthetic embedding with SMOTE or displacement and decode it deterministically;
-2. run three Gibbs refinement sweeps, sampling every non-conditioned feature from its `z_{-j}` forest conditional sampler.
+2. run three factorised conditional sampling passes, sampling every non-conditioned feature from its `z_{-j}` conditional sampler.
 
-If `condition={"label": "minority"}` is passed, matching training rows are used as anchors, neighbours are preferentially condition-matching, and conditioned output columns remain fixed during Gibbs sweeps.
+If `condition={"label": "minority"}` is passed, matching training rows are used as anchors, neighbours are preferentially condition-matching, and conditioned output columns remain fixed during factorised sampling passes.
 
 When `return_trace=True`, the trace contains both `trace_type="embedding"` rows and `trace_type="cell"` rows. Cell trace rows include the sweep, target column, sampled value, conditioning type, target embedding slice, source row and weight for continuous features, or class probabilities for categorical features.
 

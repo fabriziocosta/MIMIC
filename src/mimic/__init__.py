@@ -2,7 +2,7 @@
 
 from .decoders import ForestConditionalSampler, IdentityDecoder, LinearMixedFeatureDecoder, MixedFeatureDecoder, NeuralConditionalSampler
 from .encoders import IdentityEncoder, RandomForestPathEncoder, ResNetEncoder
-from .mimic import MIMIC, mimic_data, sample, sample_dataframe
+from .mimic import MIMIC, NearestNeighborPrivacyFilter, mimic_data, sample, sample_dataframe
 from .policies import GenerationPolicy
 
 __all__ = [
@@ -14,6 +14,7 @@ __all__ = [
     "MIMIC",
     "MixedFeatureDecoder",
     "NeuralConditionalSampler",
+    "NearestNeighborPrivacyFilter",
     "RandomForestPathEncoder",
     "ResNetEncoder",
     "mimic_data",

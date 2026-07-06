@@ -389,7 +389,7 @@ $$
 
 This preserves traceability because every sampled continuous value can be linked to a source training row.
 
-In practice, MIMIC first creates a synthetic embedding by interpolation or displacement, decodes an initial row, and then runs a small number of Gibbs-style refinement sweeps. During each sweep, non-conditioned features are resampled from their forest conditional samplers. This does not assert that the feature-wise conditionals define a perfectly coherent global density, but it gives a practical mixed-type generation mechanism that is non-parametric, local, and auditable.
+In practice, MIMIC first creates a synthetic embedding by interpolation or displacement, decodes an initial row, and then runs a small number of factorised conditional sampling passes. During each pass, non-conditioned features are resampled from their conditional samplers. This does not assert that the feature-wise conditionals define a perfectly coherent global density, but it gives a practical mixed-type generation mechanism that is non-parametric, local, and auditable.
 
 #### 5.5 Addressable and traceable generation
 
@@ -535,7 +535,7 @@ g =
 }
 $$
 
-When stochastic forest decoding is used, the trace also contains per-cell sampling records. For a continuous feature, the record can include the sampled column, Gibbs sweep, source training row, source weight, and leaf support size. For a categorical feature, it can include the sampled class and the probability vector used to sample it.
+When stochastic forest decoding is used, the trace also contains per-cell sampling records. For a continuous feature, the record can include the sampled column, sampling pass, source training row, source weight, and leaf support size. For a categorical feature, it can include the sampled class and the probability vector used to sample it.
 
 This record makes each generated row reproducible, auditable, and filterable. It should be distinguished from privacy protection. Provenance records explain how a synthetic point was generated; privacy checks determine whether the synthetic point is too close to a real point. High-stakes or scientific deployments should therefore combine generation provenance with nearest-neighbour distance checks, membership-inference tests, or minimum-distance filtering.
 

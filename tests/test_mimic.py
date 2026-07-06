@@ -18,6 +18,7 @@ from mimic import (
     MIMIC,
     MixedFeatureDecoder,
     NeuralConditionalSampler,
+    NearestNeighborPrivacyFilter,
     RandomForestPathEncoder,
     ResNetEncoder,
     mimic_data,
@@ -972,6 +973,136 @@ def test_identity_encoder_decoder_generation_uses_full_row_context():
     assert trace["method"].eq("smote").all()
 
 
+def test_nearest_neighbor_privacy_filter_accepts_ambiguous_candidates():
+    model = MIMIC(mode="identity", random_state=0).fit(
+        pd.DataFrame({"x": [0.0, 0.1, 0.2, 4.0], "label": ["a", "a", "b", "b"]})
+    )
+    model.train_embeddings_ = np.asarray([[0.0], [0.05], [0.1], [4.0]])
+
+    accepted, metrics = model._candidate_passes_privacy_filter(
+        np.asarray([0.05]),
+        source_positions=set(),
+        privacy_filter=NearestNeighborPrivacyFilter(k=3, min_ambiguous_neighbors=3, distance_ratio=2.0),
+    )
+
+    assert accepted
+    assert metrics["ambiguous_neighbor_count"] == 3
+    assert metrics["generation_source_in_top_k"] is False
+
+
+def test_nearest_neighbor_privacy_filter_rejects_unambiguous_candidates():
+    model = MIMIC(mode="identity", random_state=0).fit(
+        pd.DataFrame({"x": [0.0, 10.0, 20.0, 30.0], "label": ["a", "a", "b", "b"]})
+    )
+    model.train_embeddings_ = np.asarray([[0.0], [10.0], [20.0], [30.0]])
+
+    accepted, metrics = model._candidate_passes_privacy_filter(
+        np.asarray([0.01]),
+        source_positions=set(),
+        privacy_filter=NearestNeighborPrivacyFilter(k=3, min_ambiguous_neighbors=2, distance_ratio=1.25),
+    )
+
+    assert not accepted
+    assert metrics["ambiguous_neighbor_count"] == 1
+
+
+def test_nearest_neighbor_privacy_filter_excludes_generation_sources():
+    model = MIMIC(mode="identity", random_state=0).fit(
+        pd.DataFrame({"x": [0.0, 0.1, 0.2, 4.0], "label": ["a", "a", "b", "b"]})
+    )
+    model.train_embeddings_ = np.asarray([[0.0], [0.05], [0.1], [4.0]])
+
+    accepted, metrics = model._candidate_passes_privacy_filter(
+        np.asarray([0.05]),
+        source_positions={0, 1},
+        privacy_filter=NearestNeighborPrivacyFilter(
+            k=3,
+            min_ambiguous_neighbors=2,
+            distance_ratio=2.0,
+            exclude_generation_sources=True,
+        ),
+    )
+
+    assert not accepted
+    assert metrics["ambiguous_neighbor_count"] == 1
+    assert metrics["generation_source_in_top_k"] is True
+
+
+def test_mimic_sample_with_privacy_filter_returns_trace_fields():
+    df = pd.DataFrame(
+        {
+            "x": [0.0, 0.05, 0.1, 1.0, 1.05, 1.1],
+            "label": ["a", "a", "a", "b", "b", "b"],
+        }
+    )
+    model = MIMIC(
+        columns={"regression": ["x"], "classification": ["label"]},
+        mode="identity",
+        policy=GenerationPolicy(method="smote", n_neighbors=3),
+        random_state=0,
+    ).fit(df)
+
+    samples, trace = model.sample(
+        3,
+        privacy_filter=NearestNeighborPrivacyFilter(k=3, min_ambiguous_neighbors=1),
+        return_trace=True,
+    )
+    embedding_trace = trace[trace["trace_type"] == "embedding"]
+
+    assert samples.shape == (3, 2)
+    assert embedding_trace["privacy_filter_enabled"].eq(True).all()
+    assert embedding_trace["privacy_filter_accepted"].eq(True).all()
+    assert {"nearest_distance", "kth_distance", "ambiguous_neighbor_count", "generation_source_in_top_k", "generation_attempt"}.issubset(
+        embedding_trace.columns
+    )
+
+
+def test_mimic_sample_with_privacy_filter_raises_when_too_strict():
+    df = pd.DataFrame(
+        {
+            "x": [0.0, 10.0, 20.0, 30.0],
+            "label": ["a", "a", "b", "b"],
+        }
+    )
+    model = MIMIC(
+        columns={"regression": ["x"], "classification": ["label"]},
+        mode="identity",
+        policy=GenerationPolicy(method="smote", n_neighbors=2),
+        random_state=1,
+    ).fit(df)
+
+    with pytest.raises(ValueError, match="Nearest-neighbor privacy filter accepted"):
+        model.sample(
+            2,
+            privacy_filter=NearestNeighborPrivacyFilter(
+                k=2,
+                min_ambiguous_neighbors=2,
+                distance_ratio=1.0,
+                max_attempt_multiplier=2,
+            ),
+        )
+
+
+def test_mimic_data_forwards_privacy_filter():
+    df = pd.DataFrame(
+        {
+            "x": [0.0, 0.05, 0.1, 1.0, 1.05, 1.1],
+            "label": ["a", "a", "a", "b", "b", "b"],
+        }
+    )
+
+    synthetic = mimic_data(
+        df,
+        mode="identity",
+        columns={"regression": ["x"], "classification": ["label"]},
+        random_state=0,
+        privacy_filter=NearestNeighborPrivacyFilter(k=3, min_ambiguous_neighbors=1),
+    )
+
+    assert synthetic.shape == df.shape
+    assert list(synthetic.columns) == list(df.columns)
+
+
 def test_feature_module_context_indices_match_encoder_input_dimensions():
     df = make_frame(n=50)
     model = MIMIC(
@@ -1115,6 +1246,37 @@ def test_generation_decode_mode_factorised_produces_sampler_trace():
     assert model.generation_decode_mode_ == "factorised"
     assert not cell_trace.empty
     assert trace["resolved_generation_decode_mode"].eq("factorised").all()
+
+
+def test_factorised_sample_with_privacy_filter_keeps_cell_trace():
+    df = make_frame(n=45)
+    model = MIMIC(
+        columns={
+            "ignore": ["id"],
+            "regression": ["age", "income"],
+            "classification": ["segment", "outcome"],
+        },
+        encoder=RandomForestPathEncoder(n_estimators=5, embedding_dim=4, random_state=14),
+        decoder=ForestConditionalSampler(n_estimators=8, random_state=14),
+        policy=GenerationPolicy(method="displacement", n_neighbors=3),
+        generation_decode_mode="factorised",
+        n_bootstrap=1,
+        random_state=14,
+    ).fit(df)
+
+    samples, trace = model.sample(
+        3,
+        condition={"segment": "older"},
+        privacy_filter=NearestNeighborPrivacyFilter(k=5, min_ambiguous_neighbors=1),
+        return_trace=True,
+    )
+    embedding_trace = trace[trace["trace_type"] == "embedding"]
+    cell_trace = trace[trace["trace_type"] == "cell"]
+
+    assert samples["segment"].eq("older").all()
+    assert not cell_trace.empty
+    assert embedding_trace["privacy_filter_enabled"].eq(True).all()
+    assert embedding_trace["privacy_filter_accepted"].eq(True).all()
 
 
 def test_generation_decode_mode_factorised_requires_sampler_capable_decoder():

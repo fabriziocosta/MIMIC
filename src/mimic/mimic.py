@@ -188,6 +188,17 @@ class FeatureModule:
     classes_: np.ndarray | None = None
 
 
+@dataclass
+class NearestNeighborPrivacyFilter:
+    enabled: bool = True
+    k: int = 5
+    min_ambiguous_neighbors: int = 3
+    distance_ratio: float = 1.25
+    exclude_generation_sources: bool = True
+    max_attempt_multiplier: int = 10
+    batch_multiplier: int = 3
+
+
 class MIMIC(BaseEstimator, TransformerMixin):
     """Modular feature-wise estimator for imputation, confidence, and generation."""
 
@@ -406,7 +417,7 @@ class MIMIC(BaseEstimator, TransformerMixin):
                 rows.append(base)
         return pd.DataFrame(rows)
 
-    def sample(self, n_samples: int, condition=None, return_trace: bool = False):
+    def sample(self, n_samples: int, condition=None, return_trace: bool = False, privacy_filter=None):
         check_is_fitted(self, "train_embeddings_")
         rng = np.random.default_rng(self.random_state)
         H = np.asarray(self.train_embeddings_)
@@ -414,50 +425,16 @@ class MIMIC(BaseEstimator, TransformerMixin):
         anchor_candidates = np.flatnonzero(condition_mask)
         if len(anchor_candidates) == 0:
             raise ValueError("No training rows satisfy the requested generation condition")
-        synth_embeddings = []
-        traces = []
-        for sample_index in range(n_samples):
-            anchor_pos = int(rng.choice(anchor_candidates))
-            neigh_pos = self._choose_neighbour(anchor_pos, rng, condition_mask=condition_mask)
-            lam = float(rng.uniform(*self.policy_.lambda_range))
-            if self.policy_.method == "smote":
-                h_new = (1.0 - lam) * H[anchor_pos] + lam * H[neigh_pos]
-                trace = {
-                    "trace_type": "embedding",
-                    "sample_index": sample_index,
-                    "method": "smote",
-                    "anchor_index": self.train_index_[anchor_pos],
-                    "neighbour_index": self.train_index_[neigh_pos],
-                    "lambda": lam,
-                    "neighbour_mode": self.policy_.neighbour_mode,
-                    "condition": json.dumps(condition, sort_keys=True) if condition is not None else None,
-                    "decoder": self._decoder_name(),
-                    "generation_decode_mode": self.generation_decode_mode,
-                    "resolved_generation_decode_mode": self.generation_decode_mode_,
-                    "random_state": self.random_state,
-                }
-            else:
-                from_pos = neigh_pos
-                to_pos = self._choose_neighbour(from_pos, rng, condition_mask=condition_mask)
-                h_new = H[anchor_pos] + lam * (H[to_pos] - H[from_pos])
-                trace = {
-                    "trace_type": "embedding",
-                    "sample_index": sample_index,
-                    "method": "displacement",
-                    "anchor_index": self.train_index_[anchor_pos],
-                    "displacement_from_index": self.train_index_[from_pos],
-                    "displacement_to_index": self.train_index_[to_pos],
-                    "lambda": lam,
-                    "neighbour_mode": self.policy_.neighbour_mode,
-                    "restriction": "basic",
-                    "condition": json.dumps(condition, sort_keys=True) if condition is not None else None,
-                    "decoder": self._decoder_name(),
-                    "generation_decode_mode": self.generation_decode_mode,
-                    "resolved_generation_decode_mode": self.generation_decode_mode_,
-                    "random_state": self.random_state,
-                }
-            synth_embeddings.append(h_new)
-            traces.append(trace)
+        privacy_config = self._resolve_privacy_filter(privacy_filter)
+        synth_embeddings, traces = self._sample_embeddings(
+            n_samples,
+            rng=rng,
+            H=H,
+            condition=condition,
+            condition_mask=condition_mask,
+            anchor_candidates=anchor_candidates,
+            privacy_filter=privacy_config,
+        )
 
         H_new = np.vstack(synth_embeddings)
         if self.generation_decode_mode_ == "joint":
@@ -469,12 +446,12 @@ class MIMIC(BaseEstimator, TransformerMixin):
                 if column in X_new.columns:
                     X_new[column] = value
         if self.generation_decode_mode_ == "factorised":
-            X_new, cell_traces = self._gibbs_sample_decoded(
+            X_new, cell_traces = self._sample_factorised_decoded(
                 H_new,
                 X_new,
                 condition=condition,
                 rng=rng,
-                n_sweeps=3,
+                n_passes=3,
                 return_trace=return_trace,
             )
             traces.extend(cell_traces)
@@ -482,6 +459,184 @@ class MIMIC(BaseEstimator, TransformerMixin):
         if return_trace:
             return X_new, pd.DataFrame(traces)
         return X_new
+
+    def _sample_embeddings(
+        self,
+        n_samples: int,
+        *,
+        rng,
+        H,
+        condition,
+        condition_mask,
+        anchor_candidates,
+        privacy_filter,
+    ):
+        if privacy_filter is None or not privacy_filter.enabled:
+            embeddings = []
+            traces = []
+            for sample_index in range(n_samples):
+                h_new, trace, _sources = self._generate_embedding_candidate(
+                    sample_index=sample_index,
+                    generation_attempt=sample_index,
+                    rng=rng,
+                    H=H,
+                    condition=condition,
+                    condition_mask=condition_mask,
+                    anchor_candidates=anchor_candidates,
+                    privacy_filter_enabled=False,
+                )
+                embeddings.append(h_new)
+                traces.append(trace)
+            return embeddings, traces
+
+        max_attempts = max(n_samples, int(np.ceil(n_samples * privacy_filter.max_attempt_multiplier)))
+        embeddings = []
+        traces = []
+        attempt = 0
+        while len(embeddings) < n_samples and attempt < max_attempts:
+            remaining_attempts = max_attempts - attempt
+            remaining_samples = n_samples - len(embeddings)
+            batch_size = min(remaining_attempts, max(1, int(np.ceil(remaining_samples * privacy_filter.batch_multiplier))))
+            for _ in range(batch_size):
+                h_new, trace, sources = self._generate_embedding_candidate(
+                    sample_index=len(embeddings),
+                    generation_attempt=attempt,
+                    rng=rng,
+                    H=H,
+                    condition=condition,
+                    condition_mask=condition_mask,
+                    anchor_candidates=anchor_candidates,
+                    privacy_filter_enabled=True,
+                )
+                accepted, metrics = self._candidate_passes_privacy_filter(h_new, sources, privacy_filter)
+                trace.update(metrics)
+                trace["privacy_filter_accepted"] = bool(accepted)
+                if accepted:
+                    trace["sample_index"] = len(embeddings)
+                    embeddings.append(h_new)
+                    traces.append(trace)
+                    if len(embeddings) == n_samples:
+                        break
+                attempt += 1
+                if attempt >= max_attempts:
+                    break
+
+        if len(embeddings) < n_samples:
+            raise ValueError(
+                "Nearest-neighbor privacy filter accepted "
+                f"{len(embeddings)} of {n_samples} requested samples after {attempt} attempts. "
+                "Relax the filter or increase max_attempt_multiplier."
+            )
+        return embeddings, traces
+
+    @staticmethod
+    def _resolve_privacy_filter(privacy_filter):
+        if privacy_filter is None or privacy_filter is False:
+            return None
+        if privacy_filter is True:
+            privacy_filter = NearestNeighborPrivacyFilter()
+        if not isinstance(privacy_filter, NearestNeighborPrivacyFilter):
+            raise ValueError("privacy_filter must be None, a bool, or NearestNeighborPrivacyFilter")
+        if privacy_filter.k < 1:
+            raise ValueError("privacy_filter.k must be >= 1")
+        if privacy_filter.min_ambiguous_neighbors < 1:
+            raise ValueError("privacy_filter.min_ambiguous_neighbors must be >= 1")
+        if privacy_filter.distance_ratio < 1:
+            raise ValueError("privacy_filter.distance_ratio must be >= 1")
+        if privacy_filter.max_attempt_multiplier < 1:
+            raise ValueError("privacy_filter.max_attempt_multiplier must be >= 1")
+        if privacy_filter.batch_multiplier < 1:
+            raise ValueError("privacy_filter.batch_multiplier must be >= 1")
+        return privacy_filter
+
+    def _generate_embedding_candidate(
+        self,
+        *,
+        sample_index: int,
+        generation_attempt: int,
+        rng,
+        H,
+        condition,
+        condition_mask,
+        anchor_candidates,
+        privacy_filter_enabled: bool,
+    ):
+        anchor_pos = int(rng.choice(anchor_candidates))
+        neigh_pos = self._choose_neighbour(anchor_pos, rng, condition_mask=condition_mask)
+        lam = float(rng.uniform(*self.policy_.lambda_range))
+        base_trace = {
+            "trace_type": "embedding",
+            "sample_index": sample_index,
+            "lambda": lam,
+            "neighbour_mode": self.policy_.neighbour_mode,
+            "condition": json.dumps(condition, sort_keys=True) if condition is not None else None,
+            "decoder": self._decoder_name(),
+            "generation_decode_mode": self.generation_decode_mode,
+            "resolved_generation_decode_mode": self.generation_decode_mode_,
+            "random_state": self.random_state,
+            "privacy_filter_enabled": bool(privacy_filter_enabled),
+            "privacy_filter_accepted": True,
+            "generation_attempt": generation_attempt,
+        }
+        if self.policy_.method == "smote":
+            h_new = (1.0 - lam) * H[anchor_pos] + lam * H[neigh_pos]
+            trace = {
+                **base_trace,
+                "method": "smote",
+                "anchor_index": self.train_index_[anchor_pos],
+                "neighbour_index": self.train_index_[neigh_pos],
+            }
+            sources = {anchor_pos, neigh_pos}
+        else:
+            from_pos = neigh_pos
+            to_pos = self._choose_neighbour(from_pos, rng, condition_mask=condition_mask)
+            h_new = H[anchor_pos] + lam * (H[to_pos] - H[from_pos])
+            trace = {
+                **base_trace,
+                "method": "displacement",
+                "anchor_index": self.train_index_[anchor_pos],
+                "displacement_from_index": self.train_index_[from_pos],
+                "displacement_to_index": self.train_index_[to_pos],
+                "restriction": "basic",
+            }
+            sources = {anchor_pos, from_pos, to_pos}
+        return h_new, trace, sources
+
+    def _candidate_passes_privacy_filter(self, h_new, source_positions, privacy_filter: NearestNeighborPrivacyFilter):
+        train_embeddings = np.asarray(self.train_embeddings_)
+        n_train = len(train_embeddings)
+        k = min(max(1, int(privacy_filter.k)), n_train)
+        distances, indices = self._privacy_neighbour_distances(np.asarray(h_new, dtype=float).reshape(1, -1), k)
+        distances = distances[0]
+        indices = indices[0].astype(int)
+        nearest_distance = float(distances[0])
+        kth_distance = float(distances[-1])
+        source_positions = set(int(pos) for pos in source_positions)
+        generation_source_in_top_k = any(int(idx) in source_positions for idx in indices)
+        positive_distances = distances[distances > np.finfo(float).eps]
+        baseline_distance = nearest_distance if nearest_distance > np.finfo(float).eps else (
+            float(positive_distances[0]) if len(positive_distances) else nearest_distance
+        )
+        threshold = baseline_distance * float(privacy_filter.distance_ratio)
+        eligible = []
+        for distance, idx in zip(distances, indices):
+            if privacy_filter.exclude_generation_sources and int(idx) in source_positions:
+                continue
+            if float(distance) <= threshold:
+                eligible.append(int(idx))
+        ambiguous_count = len(eligible)
+        accepted = ambiguous_count >= int(privacy_filter.min_ambiguous_neighbors)
+        return accepted, {
+            "nearest_distance": nearest_distance,
+            "kth_distance": kth_distance,
+            "ambiguous_neighbor_count": ambiguous_count,
+            "generation_source_in_top_k": bool(generation_source_in_top_k),
+        }
+
+    def _privacy_neighbour_distances(self, H_query, k: int):
+        model = NearestNeighbors(n_neighbors=k)
+        model.fit(np.asarray(self.train_embeddings_))
+        return model.kneighbors(H_query, return_distance=True)
 
     def plot(self, X=None, embedding_columns=None, color_by=None, center=None, random_state=None, ax=None):
         check_is_fitted(self, "feature_modules_")
@@ -731,11 +886,11 @@ class MIMIC(BaseEstimator, TransformerMixin):
                     return True
         return False
 
-    def _gibbs_sample_decoded(self, H, X, condition, rng, n_sweeps: int, return_trace: bool):
+    def _sample_factorised_decoded(self, H, X, condition, rng, n_passes: int, return_trace: bool):
         X = X.copy()
         condition = condition or {}
         traces = []
-        for sweep in range(n_sweeps):
+        for sampling_pass in range(n_passes):
             for column, module in self.feature_modules_.items():
                 if column in condition:
                     X[column] = condition[column]
@@ -763,8 +918,8 @@ class MIMIC(BaseEstimator, TransformerMixin):
                         trace = {
                             "trace_type": "cell",
                             "sample_index": row_pos,
-                            "method": "gibbs_forest",
-                            "sweep": sweep,
+                            "method": "factorised_conditional",
+                            "sweep": sampling_pass,
                             "column": column,
                             "task": module.task,
                             "sampled_value": X.iloc[row_pos][column],
@@ -1377,6 +1532,7 @@ def mimic_data(
     *,
     mode="factorised",
     capacity: float = 0.25,
+    privacy_filter=None,
     **mimic_kwargs,
 ) -> pd.DataFrame:
     """Fit a default MIMIC model and return synthetic rows for ``df``.
@@ -1389,7 +1545,7 @@ def mimic_data(
 
     model = MIMIC(mode=mode, capacity=capacity, **mimic_kwargs)
     model.fit(df)
-    return model.sample(len(df) if n_samples is None else n_samples)
+    return model.sample(len(df) if n_samples is None else n_samples, privacy_filter=privacy_filter)
 
 
 sample = mimic_data
