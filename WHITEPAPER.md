@@ -588,9 +588,29 @@ High variance or high entropy indicates that the model is uncertain. This uncert
 
 A useful distinction is between uncertainty caused by noise in the observations and uncertainty caused by lack of model knowledge. This distinction is often described as aleatoric versus epistemic uncertainty in Bayesian deep learning. In MIMIC, bootstrap variation mainly targets epistemic uncertainty, while residual error and calibrated predictive distributions may be needed to capture aleatoric uncertainty.
 
-MIMIC can optionally calibrate its confidence outputs from out-of-bag bootstrap predictions. For categorical targets, temperature scaling or one-vs-rest isotonic regression can adjust reported class probabilities so that confidence better matches empirical accuracy. For regression targets, conformal calibration stores empirical residual quantiles and turns point predictions into intervals such as 80%, 90%, or 95% bands. These calibration steps are opt-in because they add fit-time work and should be evaluated for the dataset at hand.
+### 8. Calibration
 
-### 8. What makes MIMIC different?
+Calibration asks whether MIMIC's reported confidence values mean what they claim to mean. If a categorical prediction receives probability 0.8, then predictions made at that confidence level should be correct roughly 80% of the time. If a regression interval is labelled as a 90% interval, then it should contain the observed value roughly 90% of the time on comparable data.
+
+MIMIC supports calibration as an explicit, opt-in part of fitting. The calibration data comes from out-of-bag bootstrap predictions. For each feature-wise module, a bootstrap member is trained on a resampled subset of the observed target rows. Rows not used by that member form an out-of-bag set. These OOB predictions are less optimistic than in-sample predictions and therefore provide a practical calibration signal without requiring a separate held-out calibration table.
+
+For categorical targets, MIMIC can calibrate class probabilities by temperature scaling or by one-vs-rest isotonic regression. Temperature scaling learns a single scalar that softens or sharpens predicted class probabilities. Isotonic regression learns a monotone calibration map for each class and then renormalizes the calibrated probabilities so that they sum to one. Calibrated probabilities are used by `confidence()`, affecting reported probability dictionaries, predicted probability, entropy, and probability margins.
+
+For regression targets, MIMIC uses conformal calibration. It stores empirical quantiles of absolute OOB residuals and applies those quantiles around future point predictions. This leaves the point prediction unchanged while adding interval columns such as lower and upper 80%, 90%, or 95% bounds. The result is an empirical coverage mechanism rather than a parametric Gaussian assumption.
+
+Calibration is disabled by default. This is intentional: calibration adds fit-time work, depends on the amount and quality of OOB evidence, and should be evaluated for the dataset at hand. If too little OOB evidence exists for a feature, MIMIC records that calibration was skipped for that feature rather than failing the entire fit.
+
+### 9. Privacy and attribution risk
+
+Synthetic data generation can reduce direct exposure of training rows, but it does not automatically provide privacy. A generated row may still be close to one training row, or it may be easy to infer the pair of source rows used to generate it. MIMIC therefore treats privacy as a separate evaluation and filtering concern rather than claiming that synthetic generation itself is a privacy guarantee.
+
+The first privacy-oriented mechanism in MIMIC is nearest-neighbour ambiguity filtering. It operates in the learned embedding space after a candidate synthetic embedding has been generated but before it is decoded. The filter asks whether the candidate has enough similarly close non-source neighbours among the training embeddings. If the candidate is mainly explained by one row, or by the generation source pair, it is rejected. If several non-source rows are similarly close, attribution is more ambiguous and the candidate can be accepted.
+
+This mechanism is opt-in. It is intended to reduce simple nearest-neighbour and generation-pair attribution risk, not to provide formal differential privacy. It preserves the existing generation pipeline: MIMIC still creates candidates by interpolation or displacement, decodes accepted embeddings in the requested mode, and records trace information for audit. When the filter is enabled, the trace can also report nearest-neighbour distances, ambiguity counts, whether generation sources appeared among the nearest neighbours, and which generation attempt produced the accepted row.
+
+The distinction is important. Traceability and privacy pull in different directions. Traceability helps developers and researchers audit how a generated row was created. Privacy filtering reduces how easily an external observer can associate a generated row with a small number of training records. MIMIC exposes both mechanisms so users can choose the right trade-off for their use case and evaluate residual disclosure risk explicitly.
+
+### 10. What makes MIMIC different?
 
 MIMIC is best understood as a framework that unifies several operations that are often implemented separately.
 
@@ -609,11 +629,11 @@ Its distinctive features are:
 
 MIMIC is therefore not merely an imputer. It is a general-purpose system for learning the conditional structure of a dataset.
 
-### 9. Evaluation plan
+### 11. Evaluation plan
 
 MIMIC should be evaluated across four tasks.
 
-#### 9.1 Imputation accuracy
+#### 11.1 Imputation accuracy
 
 Artificially mask known entries and measure how accurately MIMIC reconstructs them.
 
@@ -623,7 +643,7 @@ For categorical features, use accuracy, macro-F1, log loss, and calibration erro
 
 Baselines should include simple statistical imputation, chained-equation models, random-forest imputation, and task-specific neural imputation models. MICE and missForest are important reference points because they already implement feature-conditional imputation in established ways.
 
-#### 9.2 Error-detection ability
+#### 11.2 Error-detection ability
 
 Inject controlled corruptions into known entries and test whether MIMIC ranks corrupted entries above clean entries.
 
@@ -635,13 +655,13 @@ $$
 
 average precision, AUROC, and workload reduction. Workload reduction measures how many human checks are avoided by prioritising the most suspicious entries first.
 
-#### 9.3 Supervised prediction
+#### 11.3 Supervised prediction
 
 Treat the target label as a missing column and compare MIMIC against conventional supervised models trained directly on the same labelled rows.
 
 The key question is not whether MIMIC always beats specialised supervised models. The key question is whether it performs competitively while also providing imputation, uncertainty, and data-repair functionality in the same framework.
 
-#### 9.4 Synthetic data quality
+#### 11.4 Synthetic data quality
 
 Evaluate synthetic data using downstream task performance, distributional similarity, nearest-neighbour distance, privacy leakage tests, and class-balance utility.
 
@@ -649,7 +669,7 @@ For minority-class augmentation, compare against SMOTE and related oversampling 
 
 Synthetic data should also be evaluated through its provenance records. Useful diagnostics include the plausibility of decoded interpolations between source rows, the failure rate of displacement transfers, the effect of ordinary versus mutual-neighbour restrictions, and the relationship between generation uncertainty and downstream utility.
 
-### 10. Key research questions
+### 12. Key research questions
 
 MIMIC raises several important research questions.
 
@@ -665,7 +685,7 @@ Fifth, how should generated instances be validated? A decoded synthetic row may 
 
 Sixth, what provenance schema is sufficient for addressable generation? The record should be detailed enough to reproduce and audit each synthetic row, but compact enough to be practical for large synthetic datasets.
 
-### 11. Conclusion
+### 13. Conclusion
 
 MIMIC proposes a unified view of tabular learning. Instead of separating missing-value imputation, supervised prediction, data cleaning, uncertainty estimation, class balancing, and synthetic data generation into unrelated pipelines, MIMIC treats them as different uses of the same learned conditional structure.
 
