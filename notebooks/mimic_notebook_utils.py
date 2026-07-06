@@ -179,6 +179,7 @@ def run_generation_mode_demo(
     n_samples: int,
     condition: dict[str, object],
     random_state: int,
+    privacy_filter=None,
 ):
     """Fit one MIMIC mode and return generated rows, traces, summaries, and plot."""
 
@@ -195,7 +196,7 @@ def run_generation_mode_demo(
         random_state=random_state,
     )
     model.fit(df)
-    samples, trace = model.sample(n_samples, condition=condition, return_trace=True)
+    samples, trace = model.sample(n_samples, condition=condition, return_trace=True, privacy_filter=privacy_filter)
     balanced = append_generated_rows(df, samples)
     mode_summary = pd.DataFrame(
         [
@@ -209,6 +210,7 @@ def run_generation_mode_demo(
                 "n_generated": len(samples),
                 "trace_rows": len(trace),
                 "cell_trace_rows": int(trace["trace_type"].eq("cell").sum()) if not trace.empty else 0,
+                "privacy_filter": privacy_filter is not None and privacy_filter is not False,
             }
         ]
     )
