@@ -164,6 +164,62 @@ def identity_generation_plot(
     return summary, samples, trace, fig, ax
 
 
+def run_generation_mode_demo(
+    df: pd.DataFrame,
+    *,
+    mode,
+    capacity: float,
+    n_samples: int,
+    condition: dict[str, object],
+    random_state: int,
+):
+    """Fit one MIMIC mode and return generated rows, traces, summaries, and plot."""
+
+    from mimic import MIMIC
+
+    model = MIMIC(
+        columns={
+            "ignore": ["id"],
+            "regression": ["x", "y"],
+            "classification": ["label"],
+        },
+        mode=mode,
+        capacity=capacity,
+        random_state=random_state,
+    )
+    model.fit(df)
+    samples, trace = model.sample(n_samples, condition=condition, return_trace=True)
+    balanced = append_generated_rows(df, samples)
+    mode_summary = pd.DataFrame(
+        [
+            {
+                "mode": mode,
+                "resolved_mode": model.mode_,
+                "resolved_level": model.level_,
+                "decode_mode": model.generation_decode_mode_,
+                "encoder": model.encoder_.__class__.__name__,
+                "decoder": model.decoder_.__class__.__name__,
+                "n_generated": len(samples),
+                "trace_rows": len(trace),
+                "cell_trace_rows": int(trace["trace_type"].eq("cell").sum()) if not trace.empty else 0,
+            }
+        ]
+    )
+    fig, axes = plot_oversampling(df, samples, title=f"Mode {mode}: {model.mode_} oversampling")
+    return {
+        "model": model,
+        "samples": samples,
+        "trace": trace,
+        "balanced": balanced,
+        "summary": mode_summary,
+        "embedding_trace": generated_embedding_trace(samples, trace, include_condition=True),
+        "cell_trace": cell_sampling_trace(trace),
+        "balance": class_balance(balanced),
+        "fig": fig,
+        "axes": axes,
+    }
+
+
 def plot_binary_classification_curves(diagnostics, *, size: tuple[float, float] = (5.5, 4)):
     """Plot ROC and precision-recall curves from binary classification diagnostics."""
 
