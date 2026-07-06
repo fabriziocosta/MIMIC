@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, fields, is_dataclass
 from copy import deepcopy
 import json
 import warnings
@@ -1267,9 +1267,9 @@ class MIMIC(BaseEstimator, TransformerMixin):
         self._verbose_print_item("capacity_parameters_", self.capacity_parameters_)
         print(f"  n_bootstrap_: {self.n_bootstrap_}")
         print(f"  generation_decode_mode_config_: {self.generation_decode_mode_config_}")
-        print(f"  encoder_: {self._verbose_value(self.encoder_)}")
-        print(f"  decoder_: {self._verbose_value(self.decoder_)}")
-        print(f"  policy_config_: {self._verbose_value(self.policy_config_)}")
+        self._verbose_print_item("encoder_", self.encoder_)
+        self._verbose_print_item("decoder_", self.decoder_)
+        self._verbose_print_item("policy_config_", self.policy_config_)
 
     def _verbose_fit_summary(self):
         if not self.verbose:
@@ -1348,6 +1348,12 @@ class MIMIC(BaseEstimator, TransformerMixin):
             print(f"{prefix}{key}:")
             for child_key, child_value in value.items():
                 cls._verbose_print_item(child_key, child_value, indent=indent + 2)
+        elif cls._is_verbose_config_object(value):
+            print(f"{prefix}{key}:")
+            print(f"{prefix}  class: {value.__class__.__name__}")
+            print(f"{prefix}  parameters:")
+            for child_key, child_value in cls._verbose_object_parameters(value).items():
+                cls._verbose_print_item(child_key, child_value, indent=indent + 4)
         elif isinstance(value, list):
             print(f"{prefix}{key}:")
             if not value:
@@ -1356,6 +1362,18 @@ class MIMIC(BaseEstimator, TransformerMixin):
                 print(f"{prefix}  - {cls._verbose_value(item)}")
         else:
             print(f"{prefix}{key}: {cls._verbose_value(value)}")
+
+    @staticmethod
+    def _is_verbose_config_object(value):
+        return value is not None and (hasattr(value, "get_params") or is_dataclass(value))
+
+    @staticmethod
+    def _verbose_object_parameters(value):
+        if hasattr(value, "get_params"):
+            return dict(value.get_params(deep=False))
+        if is_dataclass(value):
+            return {field.name: getattr(value, field.name) for field in fields(value)}
+        return {}
 
 
 def sample(df: pd.DataFrame, n_samples: int | None = None, **mimic_kwargs) -> pd.DataFrame:

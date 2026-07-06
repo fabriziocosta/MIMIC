@@ -554,14 +554,27 @@ def test_verbose_prints_hyperparameters_and_fitted_sizes(capsys):
     assert "    - x\n" in init_out
     assert "mode: direct" in init_out
     assert "capacity: 0.25" in init_out
-    assert "encoder: ResNetEncoder" in init_out
-    assert "decoder: NeuralConditionalSampler" in init_out
-    assert "policy: GenerationPolicy" in init_out
+    assert "encoder:\n" in init_out
+    assert "class: ResNetEncoder" in init_out
+    assert "decoder:\n" in init_out
+    assert "class: NeuralConditionalSampler" in init_out
+    assert "policy:\n" in init_out
+    assert "class: GenerationPolicy" in init_out
+    assert "parameters:\n" in init_out
+    assert "embedding_dim:" in init_out
+    assert "hidden_dim:" in init_out
     assert "generation_decode_mode: direct" in init_out
     assert "MIMIC resolved fit configuration:" in fit_out
     assert "capacity_parameters_:\n" in fit_out
     assert "  embedding_dim:" in fit_out
     assert "n_bootstrap_:" in fit_out
+    assert "encoder_:\n" in fit_out
+    assert "class: ResNetEncoder" in fit_out
+    assert "decoder_:\n" in fit_out
+    assert "class: NeuralConditionalSampler" in fit_out
+    assert "policy_config_:\n" in fit_out
+    assert "class: GenerationPolicy" in fit_out
+    assert "n_neighbors: 5" in fit_out
     assert "MIMIC fitted data sizes:" in fit_out
     assert "input_rows: 4" in fit_out
     assert "model_columns: 2" in fit_out
