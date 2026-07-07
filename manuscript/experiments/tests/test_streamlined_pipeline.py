@@ -3,7 +3,7 @@ import pandas as pd
 
 from streamlined.analysis import aulc_table, pairwise_comparisons
 from streamlined.config import ExperimentConfig, ProfileConfig
-from streamlined.plotting import critical_difference_inputs, plot_critical_difference_diagram, plot_learning_curves, save_all_figures
+from streamlined.plotting import critical_difference_inputs, generate_critical_difference_diagram, plot_learning_curves, save_all_figures
 from streamlined.preprocessing import fit_preprocess_train_test
 from streamlined.runner import run_condition
 from streamlined.runner import _emit_progress
@@ -201,7 +201,7 @@ def test_critical_difference_inputs_and_plot():
     )
 
     ranks, sig = critical_difference_inputs(aulc)
-    fig, ax = plot_critical_difference_diagram(aulc, segment="full")
+    fig, ax = generate_critical_difference_diagram(aulc, segment="full")
 
     assert ranks.index.tolist() == ["a", "b", "c"]
     assert sig.shape == (3, 3)

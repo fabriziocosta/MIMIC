@@ -14,6 +14,6 @@ profile:
   datasets: ["adult", "bank_marketing"]
   dataset_n_rows: {"adult": 800, "bank_marketing": 800}
   imbalance_ratios: ["2:1", "5:1"]
-  training_sizes: [128, 256]
+  training_sizes: [128, 256, 512]
   seeds: [0, 1]
   methods: ["real_balanced", "direct_smote", "direct_displacement", "latent_smote", "latent_displacement"]

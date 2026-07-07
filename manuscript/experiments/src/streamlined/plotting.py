@@ -27,7 +27,7 @@ def plot_learning_curves(learning: pd.DataFrame, *, dataset_key: str, imbalance_
     return fig, ax
 
 
-def plot_mean_learning_curves(learning: pd.DataFrame, *, imbalance_ratio: float):
+def generate_mean_learning_curves(learning: pd.DataFrame, *, imbalance_ratio: float):
     fig, ax = plt.subplots(figsize=(7, 4))
     selected = learning.loc[learning["imbalance_ratio"].eq(imbalance_ratio)]
     mean = selected.groupby(["training_size", "method"], as_index=False)["roc_auc"].mean()
@@ -50,7 +50,7 @@ def plot_rank_summary(rank: pd.DataFrame, *, segment: str = "full", imbalance_ra
     return _plot_bar_rank_summary(summary, segment=segment, imbalance_ratio=imbalance_ratio)
 
 
-def plot_critical_difference_diagram(aulc: pd.DataFrame, *, segment: str = "full", imbalance_ratio: float | None = None):
+def generate_critical_difference_diagram(aulc: pd.DataFrame, *, segment: str = "full", imbalance_ratio: float | None = None):
     selected = aulc.loc[aulc["segment"].eq(segment)]
     if imbalance_ratio is not None:
         selected = selected.loc[selected["imbalance_ratio"].eq(imbalance_ratio)]
@@ -89,6 +89,14 @@ def critical_difference_inputs(selected_aulc: pd.DataFrame) -> tuple[pd.Series, 
     ranks = rank_matrix.mean(axis=0).sort_values()
     sig_matrix = _nemenyi_sig_matrix(score_matrix[ranks.index])
     return ranks, sig_matrix
+
+
+def plot_mean_learning_curves(learning: pd.DataFrame, *, imbalance_ratio: float):
+    return generate_mean_learning_curves(learning, imbalance_ratio=imbalance_ratio)
+
+
+def plot_critical_difference_diagram(aulc: pd.DataFrame, *, segment: str = "full", imbalance_ratio: float | None = None):
+    return generate_critical_difference_diagram(aulc, segment=segment, imbalance_ratio=imbalance_ratio)
 
 
 def _plot_bar_rank_summary(summary: pd.DataFrame, *, segment: str, imbalance_ratio: float | None):
@@ -130,7 +138,7 @@ def save_all_figures(learning: pd.DataFrame, rank: pd.DataFrame, output_dir: str
             paths.extend(_save_figure(fig, path))
             plt.close(fig)
         for ratio in sorted(learning["imbalance_ratio"].unique()):
-            fig, _ax = plot_mean_learning_curves(learning, imbalance_ratio=ratio)
+            fig, _ax = generate_mean_learning_curves(learning, imbalance_ratio=ratio)
             path = output / f"mean__ratio-{ratio:g}__learning_curve"
             paths.extend(_save_figure(fig, path))
             plt.close(fig)
@@ -151,12 +159,12 @@ def save_critical_difference_figures(aulc: pd.DataFrame, output_dir: str | Path)
     if aulc.empty:
         return paths
     for segment in sorted(aulc["segment"].dropna().unique()):
-        fig, _ax = plot_critical_difference_diagram(aulc, segment=segment)
+        fig, _ax = generate_critical_difference_diagram(aulc, segment=segment)
         path = output / f"critical_difference__{segment}"
         paths.extend(_save_figure(fig, path))
         plt.close(fig)
         for ratio in sorted(aulc["imbalance_ratio"].dropna().unique()):
-            fig, _ax = plot_critical_difference_diagram(aulc, segment=segment, imbalance_ratio=ratio)
+            fig, _ax = generate_critical_difference_diagram(aulc, segment=segment, imbalance_ratio=ratio)
             path = output / f"critical_difference__{segment}__ratio-{ratio:g}"
             paths.extend(_save_figure(fig, path))
             plt.close(fig)
