@@ -38,6 +38,7 @@ def aulc_table(results: pd.DataFrame, config: ExperimentConfig) -> pd.DataFrame:
 
 
 def pairwise_comparisons(aulc: pd.DataFrame, config: ExperimentConfig) -> pd.DataFrame:
+    columns = ["dataset_key", "imbalance_ratio", "segment", "left_method", "right_method", "mean_delta", "ci_low", "ci_high", "n", "indistinguishable"]
     pairs = [
         ("latent_displacement", "latent_smote"),
         ("direct_displacement", "direct_smote"),
@@ -73,7 +74,7 @@ def pairwise_comparisons(aulc: pd.DataFrame, config: ExperimentConfig) -> pd.Dat
                     "indistinguishable": bool(abs(float(diff.mean())) <= config.equivalence_margin),
                 }
             )
-    return pd.DataFrame(rows)
+    return pd.DataFrame(rows, columns=columns)
 
 
 def rank_summary(aulc: pd.DataFrame) -> pd.DataFrame:

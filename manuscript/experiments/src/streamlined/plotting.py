@@ -5,7 +5,9 @@ from __future__ import annotations
 from pathlib import Path
 
 import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
+import scikit_posthocs as sp
 
 
 def plot_learning_curves(learning: pd.DataFrame, *, dataset_key: str, imbalance_ratio: float):
@@ -45,6 +47,51 @@ def plot_rank_summary(rank: pd.DataFrame, *, segment: str = "full", imbalance_ra
     if imbalance_ratio is not None:
         selected = selected.loc[selected["imbalance_ratio"].eq(imbalance_ratio)]
     summary = selected.groupby("method", as_index=False)["mean_rank"].mean().sort_values("mean_rank")
+    return _plot_bar_rank_summary(summary, segment=segment, imbalance_ratio=imbalance_ratio)
+
+
+def plot_critical_difference_diagram(aulc: pd.DataFrame, *, segment: str = "full", imbalance_ratio: float | None = None):
+    selected = aulc.loc[aulc["segment"].eq(segment)]
+    if imbalance_ratio is not None:
+        selected = selected.loc[selected["imbalance_ratio"].eq(imbalance_ratio)]
+    ranks, sig_matrix = critical_difference_inputs(selected)
+    fig, ax = plt.subplots(figsize=(8, 4))
+    if len(ranks) < 2:
+        ax.set_axis_off()
+        ax.set_title("Critical difference diagram: not enough methods")
+        return fig, ax
+    sp.critical_difference_diagram(
+        ranks,
+        sig_matrix,
+        ax=ax,
+        label_props={"fontsize": 8},
+        marker_props={"s": 45},
+    )
+    title = f"Critical difference diagram: {segment}"
+    if imbalance_ratio is not None:
+        title += f" ({imbalance_ratio}:1)"
+    ax.set_title(title)
+    fig.tight_layout()
+    return fig, ax
+
+
+def critical_difference_inputs(selected_aulc: pd.DataFrame) -> tuple[pd.Series, pd.DataFrame]:
+    if selected_aulc.empty:
+        return pd.Series(dtype=float), pd.DataFrame()
+    mean_by_block = selected_aulc.groupby(["dataset_key", "seed", "method"], as_index=False)["aulc"].mean()
+    score_matrix = mean_by_block.pivot_table(index=["dataset_key", "seed"], columns="method", values="aulc")
+    score_matrix = score_matrix.dropna(axis=0, how="any")
+    if score_matrix.empty:
+        methods = sorted(selected_aulc["method"].unique())
+        ranks = pd.Series({method: np.nan for method in methods}, dtype=float).dropna()
+        return ranks, pd.DataFrame(1.0, index=methods, columns=methods)
+    rank_matrix = score_matrix.rank(axis=1, ascending=False, method="average")
+    ranks = rank_matrix.mean(axis=0).sort_values()
+    sig_matrix = _nemenyi_sig_matrix(score_matrix[ranks.index])
+    return ranks, sig_matrix
+
+
+def _plot_bar_rank_summary(summary: pd.DataFrame, *, segment: str, imbalance_ratio: float | None):
     fig, ax = plt.subplots(figsize=(7, 4))
     ax.barh(summary["method"], summary["mean_rank"])
     ax.invert_yaxis()
@@ -55,6 +102,21 @@ def plot_rank_summary(rank: pd.DataFrame, *, segment: str = "full", imbalance_ra
     ax.set_title(title)
     fig.tight_layout()
     return fig, ax
+
+
+def _nemenyi_sig_matrix(score_matrix: pd.DataFrame) -> pd.DataFrame:
+    methods = list(score_matrix.columns)
+    if len(methods) < 2 or len(score_matrix) < 2:
+        return pd.DataFrame(1.0, index=methods, columns=methods)
+    block_matrix = score_matrix.copy()
+    block_matrix.index = [f"{dataset_key}__seed-{seed}" for dataset_key, seed in block_matrix.index]
+    block_matrix.index.name = "block"
+    melted = block_matrix.reset_index().melt(id_vars="block", var_name="method", value_name="score")
+    try:
+        matrix = sp.posthoc_nemenyi_friedman(melted, y_col="score", block_col="block", group_col="method", melted=True)
+        return matrix.loc[methods, methods]
+    except Exception:
+        return pd.DataFrame(1.0, index=methods, columns=methods)
 
 
 def save_all_figures(learning: pd.DataFrame, rank: pd.DataFrame, output_dir: str | Path) -> list[Path]:
@@ -80,4 +142,27 @@ def save_all_figures(learning: pd.DataFrame, rank: pd.DataFrame, output_dir: str
         fig.savefig(path, dpi=150)
         plt.close(fig)
         paths.append(path)
+    # Critical-difference diagrams need per-block AULC values, so callers should
+    # save them separately through save_critical_difference_figures.
+    return paths
+
+
+def save_critical_difference_figures(aulc: pd.DataFrame, output_dir: str | Path) -> list[Path]:
+    output = Path(output_dir)
+    output.mkdir(parents=True, exist_ok=True)
+    paths = []
+    if aulc.empty:
+        return paths
+    for segment in sorted(aulc["segment"].dropna().unique()):
+        fig, _ax = plot_critical_difference_diagram(aulc, segment=segment)
+        path = output / f"critical_difference__{segment}.png"
+        fig.savefig(path, dpi=150)
+        plt.close(fig)
+        paths.append(path)
+        for ratio in sorted(aulc["imbalance_ratio"].dropna().unique()):
+            fig, _ax = plot_critical_difference_diagram(aulc, segment=segment, imbalance_ratio=ratio)
+            path = output / f"critical_difference__{segment}__ratio-{ratio:g}.png"
+            fig.savefig(path, dpi=150)
+            plt.close(fig)
+            paths.append(path)
     return paths

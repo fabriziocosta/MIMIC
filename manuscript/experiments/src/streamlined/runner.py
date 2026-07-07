@@ -15,7 +15,7 @@ from .analysis import aulc_table, learning_curves, pairwise_comparisons, prescri
 from .config import ExperimentConfig, artifact_paths, ensure_artifact_dirs, load_config
 from .datasets import dataset_metadata, dataset_registry, load_dataset
 from .metrics import empty_results, evaluate_binary_classifier, result_schema
-from .plotting import save_all_figures
+from .plotting import save_all_figures, save_critical_difference_figures
 from .preprocessing import fit_preprocess_train_test
 from .sampling import build_balanced_training_set, make_imbalanced_subset
 
@@ -25,23 +25,27 @@ def run_profile(
     *,
     run_experiment: bool = True,
     show_progress: bool = False,
+    restart: bool = False,
 ) -> dict[str, pd.DataFrame]:
     config = load_config(config_or_path) if not isinstance(config_or_path, ExperimentConfig) else config_or_path
     ensure_artifact_dirs(config)
     paths = artifact_paths(config)
     if run_experiment:
-        raw = run_conditions(config, show_progress=show_progress)
-        _write_csv(raw, paths["raw_results"])
+        if restart and paths["raw_results"].exists():
+            paths["raw_results"].unlink()
+        raw = run_conditions(config, show_progress=show_progress, raw_results_path=paths["raw_results"])
     else:
         raw = _read_csv(paths["raw_results"], empty_results())
     tables = build_analysis_artifacts(config, raw)
     return {"raw_results": raw, **tables}
 
 
-def run_conditions(config: ExperimentConfig, *, show_progress: bool = False) -> pd.DataFrame:
-    rows = []
+def run_conditions(config: ExperimentConfig, *, show_progress: bool = False, raw_results_path: Path | None = None) -> pd.DataFrame:
+    existing = _read_csv(raw_results_path, empty_results()) if raw_results_path is not None else empty_results()
+    completed_keys = _completed_condition_keys(existing)
+    rows = existing.to_dict("records") if not existing.empty else []
     total = _total_conditions(config)
-    completed = 0
+    completed = len(completed_keys)
     started_at = time.monotonic()
     _emit_progress(completed, total, show_progress=show_progress, started_at=started_at)
     for dataset_key in config.profile.datasets:
@@ -68,6 +72,9 @@ def run_conditions(config: ExperimentConfig, *, show_progress: bool = False) -> 
                         random_state=_condition_seed(seed, ratio, training_size),
                     )
                     for method in config.profile.methods:
+                        key = _condition_key(dataset_key, ratio, training_size, seed, method)
+                        if key in completed_keys:
+                            continue
                         completed += 1
                         _emit_progress(
                             completed,
@@ -80,20 +87,22 @@ def run_conditions(config: ExperimentConfig, *, show_progress: bool = False) -> 
                             method=method,
                             started_at=started_at,
                         )
-                        rows.append(
-                            run_condition(
-                                config,
-                                dataset_key=dataset_key,
-                                imbalanced_raw=imbalanced,
-                                prepared=prepared,
-                                method=method,
-                                seed=seed,
-                                ratio=ratio,
-                                training_size=training_size,
-                                metadata=metadata,
-                            )
+                        row = run_condition(
+                            config,
+                            dataset_key=dataset_key,
+                            imbalanced_raw=imbalanced,
+                            prepared=prepared,
+                            method=method,
+                            seed=seed,
+                            ratio=ratio,
+                            training_size=training_size,
+                            metadata=metadata,
                         )
-    return pd.DataFrame(rows, columns=result_schema() + _metadata_columns())
+                        rows.append(row)
+                        completed_keys.add(key)
+                        if raw_results_path is not None:
+                            _append_csv_row(row, raw_results_path, columns=result_schema() + _metadata_columns())
+    return _dedupe_results(pd.DataFrame(rows, columns=result_schema() + _metadata_columns()))
 
 
 def run_condition(
@@ -153,6 +162,7 @@ def build_analysis_artifacts(config: ExperimentConfig, raw: pd.DataFrame) -> dic
     _write_csv(rank, paths["rank"])
     paths["conclusions"].write_text(prescriptive_conclusions(regime))
     save_all_figures(learning, rank, paths["figures"])
+    save_critical_difference_figures(aulc, paths["figures"])
     return {"learning_curves": learning, "aulc": aulc, "pairwise": pairwise, "regime": regime, "rank": rank, "registry": dataset_registry()}
 
 
@@ -197,6 +207,12 @@ def _write_csv(frame: pd.DataFrame, path: Path) -> None:
     frame.to_csv(path, index=False)
 
 
+def _append_csv_row(row: dict, path: Path, *, columns: list[str]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    frame = pd.DataFrame([{column: row.get(column) for column in columns}], columns=columns)
+    frame.to_csv(path, mode="a", header=not path.exists(), index=False)
+
+
 def _read_csv(path: Path, default: pd.DataFrame) -> pd.DataFrame:
     if not path.exists():
         return default
@@ -215,6 +231,32 @@ def _metadata_columns() -> list[str]:
         "missingness_rate",
         "baseline_roc_auc",
     ]
+
+
+def _condition_key(dataset_key: str, ratio: float, training_size: int, seed: int, method: str) -> tuple:
+    return (str(dataset_key), float(ratio), int(training_size), int(seed), str(method))
+
+
+def _completed_condition_keys(results: pd.DataFrame) -> set[tuple]:
+    if results.empty:
+        return set()
+    required = {"dataset_key", "imbalance_ratio", "training_size", "seed", "method"}
+    if not required.issubset(results.columns):
+        return set()
+    return {
+        _condition_key(row.dataset_key, row.imbalance_ratio, row.training_size, row.seed, row.method)
+        for row in results[list(required)].itertuples(index=False)
+    }
+
+
+def _dedupe_results(results: pd.DataFrame) -> pd.DataFrame:
+    if results.empty:
+        return results
+    key_columns = ["dataset_key", "imbalance_ratio", "training_size", "seed", "method"]
+    present = [column for column in key_columns if column in results.columns]
+    if len(present) != len(key_columns):
+        return results
+    return results.drop_duplicates(subset=key_columns, keep="last").reset_index(drop=True)
 
 
 def _total_conditions(config: ExperimentConfig) -> int:

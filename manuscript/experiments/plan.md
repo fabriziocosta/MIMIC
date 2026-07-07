@@ -110,6 +110,7 @@ Required summaries:
 - Significance or equivalence decisions for synthetic methods versus `real_balanced`.
 - Critical difference diagrams ranking methods by `full_aulc` and `early_aulc`.
 - Separate critical difference diagrams by imbalance ratio.
+- Generate critical difference diagrams with `scikit-posthocs` from mean ranks and Nemenyi/Friedman post-hoc p-value matrices.
 
 For the real-data comparison, report where each synthetic method is statistically indistinguishable from `real_balanced`, and the most severe imbalance ratio where that remains true.
 
@@ -203,6 +204,7 @@ Required generated artifacts:
 
 - Implement the condition runner for dataset, imbalance ratio, training size, method, and seed.
 - Save raw condition-level outputs incrementally.
+- Make runs interruptible and resumable by appending each completed condition to `raw/condition_results.csv`; skip completed condition keys on resume and provide a restart flag to rebuild from scratch.
 - Add a smoke command that can run in minutes.
 - Add tests for fixed test-set reuse, class balance after generation, and reproducibility with fixed seeds.
 

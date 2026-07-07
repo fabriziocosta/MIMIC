@@ -3,10 +3,12 @@ import pandas as pd
 
 from streamlined.analysis import aulc_table, pairwise_comparisons
 from streamlined.config import ExperimentConfig, ProfileConfig
-from streamlined.plotting import plot_learning_curves
+from streamlined.plotting import critical_difference_inputs, plot_critical_difference_diagram, plot_learning_curves
 from streamlined.preprocessing import fit_preprocess_train_test
 from streamlined.runner import run_condition
 from streamlined.runner import _emit_progress
+from streamlined.runner import run_profile
+from streamlined import runner
 from streamlined import sampling
 from streamlined.sampling import build_balanced_training_set, generated_count_for_balance, make_imbalanced_subset, repair_preprocessed_samples
 
@@ -155,6 +157,27 @@ def test_aulc_pairwise_and_plotting():
     fig.clear()
 
 
+def test_critical_difference_inputs_and_plot():
+    aulc = pd.DataFrame(
+        {
+            "dataset_key": ["d1", "d1", "d1", "d2", "d2", "d2"],
+            "imbalance_ratio": [2.0] * 6,
+            "method": ["a", "b", "c"] * 2,
+            "seed": [0] * 6,
+            "segment": ["full"] * 6,
+            "aulc": [0.9, 0.8, 0.7, 0.85, 0.75, 0.65],
+        }
+    )
+
+    ranks, sig = critical_difference_inputs(aulc)
+    fig, ax = plot_critical_difference_diagram(aulc, segment="full")
+
+    assert ranks.index.tolist() == ["a", "b", "c"]
+    assert sig.shape == (3, 3)
+    assert "Critical difference" in ax.get_title()
+    fig.clear()
+
+
 def test_progress_emitter_prints_text_bar(capsys):
     _emit_progress(
         1,
@@ -173,3 +196,90 @@ def test_progress_emitter_prints_text_bar(capsys):
     assert "ETA=" in out
     assert "adult" in out
     assert "direct_smote" in out
+
+
+def test_run_profile_resumes_completed_raw_results(tmp_path, monkeypatch):
+    frame = make_frame(40)
+    calls = []
+
+    monkeypatch.setattr(runner, "load_dataset", lambda dataset_key, n_rows=None, random_state=0: frame)
+
+    def fake_run_condition(config, *, dataset_key, imbalanced_raw, prepared, method, seed, ratio, training_size, metadata):
+        calls.append((dataset_key, ratio, training_size, seed, method))
+        return {
+            "dataset_key": dataset_key,
+            "imbalance_ratio": ratio,
+            "training_size": training_size,
+            "seed": seed,
+            "method": method,
+            "generated_count": 0,
+            "real_minority_count": 2,
+            "real_majority_count": 2,
+            "roc_auc": 0.5 + 0.01 * len(calls),
+            "pr_auc": 0.5,
+            "balanced_accuracy": 0.5,
+            "f1": 0.5,
+            "brier": 0.25,
+        }
+
+    monkeypatch.setattr(runner, "run_condition", fake_run_condition)
+    config = ExperimentConfig(
+        ProfileConfig(
+            name="tiny",
+            datasets=("adult",),
+            imbalance_ratios=(2.0,),
+            training_sizes=(16,),
+            seeds=(0,),
+            methods=("real_balanced", "direct_smote"),
+        ),
+        artifact_dir=tmp_path,
+    )
+
+    first = run_profile(config, run_experiment=True, restart=False)
+    second = run_profile(config, run_experiment=True, restart=False)
+
+    assert len(calls) == 2
+    assert len(first["raw_results"]) == 2
+    assert len(second["raw_results"]) == 2
+
+
+def test_run_profile_restart_reruns_completed_conditions(tmp_path, monkeypatch):
+    frame = make_frame(40)
+    calls = []
+
+    monkeypatch.setattr(runner, "load_dataset", lambda dataset_key, n_rows=None, random_state=0: frame)
+    def fake_run_condition(config, **kwargs):
+        calls.append(kwargs["method"])
+        return {
+        "dataset_key": kwargs["dataset_key"],
+        "imbalance_ratio": kwargs["ratio"],
+        "training_size": kwargs["training_size"],
+        "seed": kwargs["seed"],
+        "method": kwargs["method"],
+        "generated_count": 0,
+        "real_minority_count": 2,
+        "real_majority_count": 2,
+        "roc_auc": 0.5,
+        "pr_auc": 0.5,
+        "balanced_accuracy": 0.5,
+        "f1": 0.5,
+        "brier": 0.25,
+    }
+
+    monkeypatch.setattr(runner, "run_condition", fake_run_condition)
+    config = ExperimentConfig(
+        ProfileConfig(
+            name="tiny",
+            datasets=("adult",),
+            imbalance_ratios=(2.0,),
+            training_sizes=(16,),
+            seeds=(0,),
+            methods=("real_balanced",),
+        ),
+        artifact_dir=tmp_path,
+    )
+
+    run_profile(config, run_experiment=True, restart=False)
+    run_profile(config, run_experiment=True, restart=True)
+
+    assert calls == ["real_balanced", "real_balanced"]

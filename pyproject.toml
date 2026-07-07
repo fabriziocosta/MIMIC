@@ -27,6 +27,7 @@ dev = [
     "ipykernel",
     "jupyter",
     "seaborn",
+    "scikit-posthocs",
 ]
 
 [tool.setuptools.packages.find]
