@@ -26,6 +26,8 @@ Evaluate five training-data construction methods under the same downstream class
 
 MIMIC must be fit jointly on all available training rows for a condition. It should not be trained separately per class. Class awareness happens only during sampling: anchors, neighbours, and displacement endpoints are restricted to the requested class, normally the minority class.
 
+For these generation-focused experiments, configure MIMIC with `bootstrap=False` unless a condition explicitly studies confidence estimates. Generation should use the full-data feature embeddings; bootstrap members are for uncertainty and calibration, not for defining the synthetic-sampling geometry.
+
 ## Experimental Factors
 
 Use a full factorial design, with a smaller smoke profile for development and a full profile for manuscript results.

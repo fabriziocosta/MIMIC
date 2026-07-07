@@ -176,6 +176,18 @@ Learning rate is scaled downward in log space as capacity increases.
 Explicit `encoder`, `decoder`, `policy`, `n_bootstrap`, or
 `generation_decode_mode` arguments override the preset where supplied.
 
+Generation uses one encoder-decoder member per feature trained on all observed
+training rows for that feature. Bootstrap members are kept separate and are used
+for confidence diagnostics and out-of-bag calibration, not for defining the
+neighbour-search geometry used by `sample()`. Set `bootstrap=False` for
+generation-only runs to skip fitting bootstrap members while still fitting the
+full-data generation member:
+
+```python
+model = MIMIC(mode="factorised", capacity=1.0, bootstrap=False, random_state=0)
+synthetic = model.fit(df).sample(1000)
+```
+
 Parallelism has two layers. `n_jobs` is passed to compatible underlying
 estimators such as random forests, while `feature_n_jobs` parallelizes MIMIC's
 feature-wise module fitting across target columns. Keep only one outer layer
@@ -187,7 +199,8 @@ Set `verbose=True` to print constructor hyperparameters immediately and fitted
 data/embedding sizes during `fit`.
 
 Calibration is opt-in. When enabled, MIMIC uses out-of-bag bootstrap predictions
-from `fit()` to calibrate confidence outputs:
+from `fit()` to calibrate confidence outputs. Calibration therefore requires
+bootstrap members; leave `bootstrap=True` when using these diagnostics:
 
 ```python
 model = MIMIC(

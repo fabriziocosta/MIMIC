@@ -68,6 +68,7 @@ MIMIC(
     mode="factorised",
     capacity=0.25,
     n_bootstrap=None,
+    bootstrap=True,
     random_state=None,
     n_jobs=None,
     verbose=False,
@@ -116,7 +117,7 @@ The modes map to generation behavior and also accept numeric aliases:
 * `mode="factorised"` or `mode=2`: `ResNetEncoder` with `NeuralConditionalSampler`, factorised probabilistic decoding;
 * `mode="joint"` or `mode=3`: `ResNetEncoder` with `NeuralConditionalSampler`, deterministic joint decoding.
 
-Explicit `encoder`, `decoder`, `policy`, `n_bootstrap`, or
+Explicit `encoder`, `decoder`, `policy`, `n_bootstrap`, `bootstrap`, or
 `generation_decode_mode` arguments override the corresponding preset behaviour.
 If a custom decoder is supplied and `generation_decode_mode="auto"`, decode-mode
 resolution follows the decoder capability rather than forcing the default
@@ -145,7 +146,10 @@ decay, which use log-space interpolation:
 When `encoder` or `decoder` is explicitly supplied, that component is used as
 given and its internal hyperparameters are not changed by `capacity`. When
 `n_bootstrap` is explicitly supplied, it overrides the capacity-derived
-bootstrap count.
+bootstrap count. `bootstrap=False` disables bootstrap member fitting and resolves
+the fitted `n_bootstrap_` to `0`; this is intended for generation-only workloads
+where the full-data generation embedding is needed but confidence estimates are
+not.
 
 `verbose=False` is the default. When `verbose=True`, construction prints the
 raw constructor hyperparameters immediately, and fitting prints the resolved
@@ -240,12 +244,12 @@ For each modelled column `j`:
 
 1. Build a row mask selecting rows where `X[j]` is observed.
 2. Build the context matrix by slicing the global encoded matrix to `FeatureModule.context_indices`.
-3. Fit the encoder ensemble on `X_{-j}`.
-4. Transform `X_{-j}` through each encoder to obtain embeddings.
-5. Fit the decoder ensemble to predict `X[j]` from the embeddings.
-6. Store metadata needed for decoding, uncertainty, and later generation.
+3. Fit one full-data encoder-decoder member on all observed rows for `j`.
+4. If `bootstrap=True`, fit additional bootstrap encoder-decoder members for uncertainty and out-of-bag calibration.
+5. Store metadata needed for decoding, uncertainty, and later generation.
 
-Bootstrapping is used to support uncertainty:
+Bootstrapping is used to support uncertainty and calibration, not to define the
+generation embedding:
 
 ```text
 for b in range(n_bootstrap):
@@ -275,13 +279,17 @@ $$
 
 MIMIC uses concatenation because it is simple, inspectable, and compatible with nearest-neighbour search.
 
-For ensemble encoders, `transform` should average the embeddings across bootstrap members:
+For each feature, `transform` uses the full-data member fitted on all observed
+rows for that feature:
 
 $$
-h_j = \frac{1}{B}\sum_{b=1}^{B}E_j^{(b)}(X_{-j})
+h_j = E_j^{\mathrm{full}}(X_{-j})
 $$
 
-This gives one deterministic feature-wise embedding per target column while still using the full encoder ensemble.
+This gives one deterministic, stable feature-wise embedding per target column
+for nearest-neighbour search and synthetic generation. Bootstrap embeddings are
+kept separate for confidence diagnostics; averaging them into the generation
+geometry is intentionally avoided.
 
 ## 6. Imputation
 

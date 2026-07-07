@@ -161,7 +161,10 @@ directly: the conditional sampler operates on MIMIC's learned representation of 
 
 #### 4.4 Bootstrap ensemble
 
-MIMIC can train multiple versions of each feature-wise module on bootstrapped samples of the data. The ensemble produces a distribution of predictions:
+MIMIC trains a full-data version of each feature-wise module for representation
+learning and generation. It can also train multiple additional versions on
+bootstrapped samples of the data. The bootstrap ensemble produces a distribution
+of predictions:
 
 $$
 \hat{x}_{j}^{(1)}, \hat{x}_{j}^{(2)}, ..., \hat{x}_{j}^{(B)}
@@ -170,6 +173,12 @@ $$
 From this distribution, MIMIC can compute uncertainty measures such as variance, entropy, class-probability dispersion, vote disagreement, and confidence scores.
 
 This is particularly important because the model’s most useful output may not be the imputed value itself, but the confidence attached to that value.
+
+The generation embedding is not an average of bootstrap embeddings. Synthetic
+generation uses the full-data feature embeddings so that neighbour search and
+local displacement operate in a single stable representation. Bootstrap members
+remain useful for confidence estimates and calibration, and can be disabled for
+generation-only runs.
 
 ### 5. Operating modes
 
@@ -250,6 +259,8 @@ This gives a unified view of supervised learning, semi-supervised learning, and 
 #### 5.4 Synthetic data generation
 
 MIMIC can generate new instances by operating in the learned embedding space.
+In the current implementation this embedding is produced by the full-data
+feature-wise members, while bootstrap members are kept separate for uncertainty.
 
 There are two proposed policies.
 

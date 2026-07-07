@@ -186,6 +186,7 @@ class FeatureModule:
     task: str
     context_columns: list[str]
     context_indices: np.ndarray
+    full_member: BootstrapMember
     members: list[BootstrapMember]
     observed_mask: pd.Series
     label_encoder: LabelEncoder | None = None
@@ -220,6 +221,7 @@ class MIMIC(BaseEstimator, TransformerMixin):
         level=None,
         capacity: float = 0.25,
         n_bootstrap: int | None = None,
+        bootstrap: bool = True,
         random_state: int | None = None,
         n_jobs: int | None = None,
         feature_n_jobs: int | None = 1,
@@ -237,6 +239,7 @@ class MIMIC(BaseEstimator, TransformerMixin):
         self.level = level
         self.capacity = capacity
         self.n_bootstrap = n_bootstrap
+        self.bootstrap = bootstrap
         self.random_state = random_state
         self.n_jobs = n_jobs
         self.feature_n_jobs = feature_n_jobs
@@ -269,10 +272,13 @@ class MIMIC(BaseEstimator, TransformerMixin):
                 raise ValueError(f"Column {column!r} has too few observed rows")
             if task == "classification" and X.loc[observed_mask, column].nunique() < 2:
                 raise ValueError(f"Classification column {column!r} needs at least two observed classes")
-            bootstrap_samples = [
-                rng.choice(np.arange(len(observed_indices)), size=len(observed_indices), replace=True)
-                for _ in range(self.n_bootstrap_)
-            ]
+            if self.bootstrap_:
+                bootstrap_samples = [
+                    rng.choice(np.arange(len(observed_indices)), size=len(observed_indices), replace=True)
+                    for _ in range(self.n_bootstrap_)
+                ]
+            else:
+                bootstrap_samples = []
             feature_specs.append((column, bootstrap_samples))
 
         self.global_preprocessor_ = GlobalContextPreprocessor(include_missing_indicators=True)
@@ -334,33 +340,37 @@ class MIMIC(BaseEstimator, TransformerMixin):
         oob_regression_true = []
         oob_class_probabilities = []
         oob_class_true = []
+        full_member = self._fit_feature_member(
+            Xp_all,
+            column=column,
+            task=task,
+            rows=observed_indices,
+            y=y_full,
+            context_indices=context_indices,
+            encoder_index=0,
+        )
         for b, sample_pos in enumerate(bootstrap_samples):
             sample_rows = observed_indices[sample_pos]
             sampled_observed_positions = sample_pos
             sampled_y = y_full[sampled_observed_positions]
 
-            Xp = Xp_all[sample_rows][:, context_indices]
-
-            encoder = self._new_encoder(task, b)
-            encoder.fit(Xp, sampled_y)
-            H = self._to_2d(encoder.transform(Xp))
-
-            decoder = self._new_decoder()
-            decoder.fit_target(column, task, H, sampled_y)
-            members.append(
-                BootstrapMember(
-                    encoder=encoder,
-                    decoder=decoder,
-                    embedding_dim=H.shape[1],
-                )
+            member = self._fit_feature_member(
+                Xp_all,
+                column=column,
+                task=task,
+                rows=sample_rows,
+                y=sampled_y,
+                context_indices=context_indices,
+                encoder_index=b + 1,
             )
+            members.append(member)
 
             oob_source = np.setdiff1d(np.arange(len(observed_indices)), np.unique(sampled_observed_positions))
             if len(oob_source):
                 oob_rows = observed_indices[oob_source]
                 Xp_oob = Xp_all[oob_rows][:, context_indices]
-                H_oob = self._to_2d(encoder.transform(Xp_oob), width=H.shape[1])
-                pred = decoder.predict_target(column, H_oob)
+                H_oob = self._to_2d(member.encoder.transform(Xp_oob), width=member.embedding_dim)
+                pred = member.decoder.predict_target(column, H_oob)
                 if task == "regression":
                     pred_raw = self._inverse_regression_target(pred.astype(float), target_scaler)
                     true_raw = self._inverse_regression_target(y_full[oob_source].astype(float), target_scaler)
@@ -370,8 +380,8 @@ class MIMIC(BaseEstimator, TransformerMixin):
                     oob_regression_true.extend(true_raw.tolist())
                 else:
                     p = self._align_proba_to_classes(
-                        decoder.predict_proba_target(column, H_oob),
-                        decoder.models_[column],
+                        member.decoder.predict_proba_target(column, H_oob),
+                        member.decoder.models_[column],
                         len(classes),
                     )
                     oob_class_probabilities.append(p)
@@ -384,6 +394,7 @@ class MIMIC(BaseEstimator, TransformerMixin):
             task=task,
             context_columns=context_columns,
             context_indices=context_indices,
+            full_member=full_member,
             members=members,
             observed_mask=observed_mask,
             label_encoder=label_encoder,
@@ -406,6 +417,29 @@ class MIMIC(BaseEstimator, TransformerMixin):
             }
         return column, module, oob_calibration_data
 
+    def _fit_feature_member(
+        self,
+        Xp_all,
+        *,
+        column: str,
+        task: str,
+        rows: np.ndarray,
+        y: np.ndarray,
+        context_indices: np.ndarray,
+        encoder_index: int,
+    ):
+        Xp = Xp_all[rows][:, context_indices]
+        encoder = self._new_encoder(task, encoder_index)
+        encoder.fit(Xp, y)
+        H = self._to_2d(encoder.transform(Xp))
+        decoder = self._new_decoder()
+        decoder.fit_target(column, task, H, y)
+        return BootstrapMember(
+            encoder=encoder,
+            decoder=decoder,
+            embedding_dim=H.shape[1],
+        )
+
     def transform(self, X):
         check_is_fitted(self, "feature_modules_")
         X = self._as_dataframe(X)
@@ -414,13 +448,11 @@ class MIMIC(BaseEstimator, TransformerMixin):
         self._embedding_slices_ = {}
         start = 0
         for column, module in self.feature_modules_.items():
-            embeddings = []
-            max_width = max(member.embedding_dim for member in module.members)
             Xp = Xp_all[:, module.context_indices]
-            for member in module.members:
-                emb = self._to_2d(member.encoder.transform(Xp), width=max_width)
-                embeddings.append(emb)
-            block = np.mean(np.stack(embeddings, axis=0), axis=0)
+            block = self._to_2d(
+                module.full_member.encoder.transform(Xp),
+                width=module.full_member.embedding_dim,
+            )
             parts.append(block)
             self._embedding_slices_[column] = slice(start, start + block.shape[1])
             start += block.shape[1]
@@ -809,10 +841,10 @@ class MIMIC(BaseEstimator, TransformerMixin):
     def _predict_column(self, X: pd.DataFrame, column: str):
         module = self.feature_modules_[column]
         Xp_all = self.global_preprocessor_.transform_all(X)
+        prediction_members = self._prediction_members(module)
         if module.task == "regression":
             preds = []
-            max_width = max(member.embedding_dim for member in module.members)
-            for member in module.members:
+            for member in prediction_members:
                 H = self._member_embedding(member, module, X, Xp_all=Xp_all, max_width=member.embedding_dim)
                 pred_scaled = member.decoder.predict_target(column, H).astype(float)
                 preds.append(self._inverse_regression_target(pred_scaled, module.target_scaler))
@@ -834,7 +866,7 @@ class MIMIC(BaseEstimator, TransformerMixin):
 
         probas = []
         votes = []
-        for member in module.members:
+        for member in prediction_members:
             H = self._member_embedding(member, module, X, Xp_all=Xp_all, max_width=member.embedding_dim)
             p = self._aligned_predict_proba(member, module, column, H)
             probas.append(p)
@@ -1040,19 +1072,15 @@ class MIMIC(BaseEstimator, TransformerMixin):
         for column, module in self.feature_modules_.items():
             sl = self.embedding_slices_[column]
             block = H[:, sl]
+            member = module.full_member
             if module.task == "regression":
-                preds = []
-                for member in module.members:
-                    b = self._to_2d(block, width=member.embedding_dim)[:, : member.embedding_dim]
-                    pred_scaled = member.decoder.predict_target(column, b).astype(float)
-                    preds.append(self._inverse_regression_target(pred_scaled, module.target_scaler))
-                data[column] = np.vstack(preds).mean(axis=0)
+                b = self._to_2d(block, width=member.embedding_dim)[:, : member.embedding_dim]
+                pred_scaled = member.decoder.predict_target(column, b).astype(float)
+                data[column] = self._inverse_regression_target(pred_scaled, module.target_scaler)
             else:
-                probas = []
-                for member in module.members:
-                    b = self._to_2d(block, width=member.embedding_dim)[:, : member.embedding_dim]
-                    probas.append(self._aligned_predict_proba(member, module, column, b))
-                pred_codes = np.argmax(np.stack(probas, axis=0).mean(axis=0), axis=1)
+                b = self._to_2d(block, width=member.embedding_dim)[:, : member.embedding_dim]
+                proba = self._aligned_predict_proba(member, module, column, b)
+                pred_codes = np.argmax(proba, axis=1)
                 data[column] = module.label_encoder.inverse_transform(pred_codes)
         return pd.DataFrame(data)
 
@@ -1069,9 +1097,9 @@ class MIMIC(BaseEstimator, TransformerMixin):
             else:
                 y = module.target_scaler.transform(y_observed.astype(float).to_numpy().reshape(-1, 1)).ravel()
             train_indices = self.train_index_[observed_pos].to_numpy()
-            for member in module.members:
-                if hasattr(member.decoder, "fit_sampler_target"):
-                    member.decoder.fit_sampler_target(column, module.task, H_context, y, train_indices=train_indices)
+            member = module.full_member
+            if hasattr(member.decoder, "fit_sampler_target"):
+                member.decoder.fit_sampler_target(column, module.task, H_context, y, train_indices=train_indices)
 
     def _fit_joint_decoder(self):
         complete_mask = self.train_X_[self.model_columns_].notna().all(axis=1).to_numpy()
@@ -1096,14 +1124,13 @@ class MIMIC(BaseEstimator, TransformerMixin):
     def _joint_decoder_prototype(self):
         prototype = None
         for module in self.feature_modules_.values():
-            for member in module.members:
-                decoder = member.decoder
-                if prototype is None:
-                    prototype = decoder
-                if not hasattr(decoder, "conditional_evidence_target"):
-                    raise ValueError(
-                        "generation_decode_mode='joint' requires NeuralConditionalSampler-style conditional evidence"
-                    )
+            decoder = module.full_member.decoder
+            if prototype is None:
+                prototype = decoder
+            if not hasattr(decoder, "conditional_evidence_target"):
+                raise ValueError(
+                    "generation_decode_mode='joint' requires NeuralConditionalSampler-style conditional evidence"
+                )
         if prototype is None or not hasattr(prototype, "fit_joint_decoder"):
             raise ValueError("generation_decode_mode='joint' requires a decoder that can fit a joint row decoder")
         return prototype
@@ -1112,14 +1139,12 @@ class MIMIC(BaseEstimator, TransformerMixin):
         blocks = []
         for column, module in self.feature_modules_.items():
             H_context = self._without_slice(H, self.embedding_slices_[column])
-            member_evidence = []
-            for member in module.members:
-                if not hasattr(member.decoder, "conditional_evidence_target"):
-                    raise ValueError(
-                        "generation_decode_mode='joint' requires NeuralConditionalSampler-style conditional evidence"
-                    )
-                member_evidence.append(member.decoder.conditional_evidence_target(column, module.task, H_context))
-            blocks.append(np.mean(np.stack(member_evidence, axis=0), axis=0))
+            member = module.full_member
+            if not hasattr(member.decoder, "conditional_evidence_target"):
+                raise ValueError(
+                    "generation_decode_mode='joint' requires NeuralConditionalSampler-style conditional evidence"
+                )
+            blocks.append(member.decoder.conditional_evidence_target(column, module.task, H_context))
         return np.hstack(blocks)
 
     def _decode_joint_embeddings(self, H):
@@ -1136,9 +1161,9 @@ class MIMIC(BaseEstimator, TransformerMixin):
 
     def _has_stochastic_decoders(self):
         for column, module in self.feature_modules_.items():
-            for member in module.members:
-                if hasattr(member.decoder, "can_sample_target") and member.decoder.can_sample_target(column):
-                    return True
+            member = module.full_member
+            if hasattr(member.decoder, "can_sample_target") and member.decoder.can_sample_target(column):
+                return True
         return False
 
     def _sample_factorised_decoded(self, H, X, condition, rng, n_passes: int, return_trace: bool):
@@ -1195,14 +1220,14 @@ class MIMIC(BaseEstimator, TransformerMixin):
         return X, traces
 
     def _sampleable_member(self, module: FeatureModule, column: str, rng):
-        candidates = [
-            (i, member)
-            for i, member in enumerate(module.members)
-            if hasattr(member.decoder, "can_sample_target") and member.decoder.can_sample_target(column)
-        ]
-        if not candidates:
+        member = module.full_member
+        if not hasattr(member.decoder, "can_sample_target") or not member.decoder.can_sample_target(column):
             return None, None
-        return candidates[int(rng.integers(0, len(candidates)))]
+        return -1, member
+
+    @staticmethod
+    def _prediction_members(module: FeatureModule):
+        return module.members if module.members else [module.full_member]
 
     @staticmethod
     def _without_slice(H, sl):
@@ -1372,6 +1397,8 @@ class MIMIC(BaseEstimator, TransformerMixin):
 
     def _resolve_mode_configuration(self):
         self._validate_calibration_configuration()
+        if not isinstance(self.bootstrap, bool):
+            raise ValueError("bootstrap must be a bool")
         mode_name = self._resolve_mode_name()
         capacity = self._validate_capacity(self.capacity)
         preset_params = self._capacity_parameters(capacity)
@@ -1380,7 +1407,9 @@ class MIMIC(BaseEstimator, TransformerMixin):
         self.capacity_ = capacity
         self.capacity_parameters_ = preset_params
 
-        self.n_bootstrap_ = preset_params["n_bootstrap"] if self.n_bootstrap is None else self.n_bootstrap
+        requested_bootstrap = preset_params["n_bootstrap"] if self.n_bootstrap is None else self.n_bootstrap
+        self.bootstrap_ = bool(self.bootstrap)
+        self.n_bootstrap_ = int(requested_bootstrap) if self.bootstrap_ else 0
         self.policy_config_ = self.policy if self.policy is not None else self._default_generation_policy()
         preset_encoder, preset_decoder, preset_mode = self._preset_components(mode_name, preset_params)
 
@@ -1691,6 +1720,7 @@ class MIMIC(BaseEstimator, TransformerMixin):
         print(f"  mode_: {self.mode_}")
         print(f"  level_: {self.level_}")
         print(f"  capacity_: {self.capacity_}")
+        print(f"  bootstrap_: {self.bootstrap_}")
         print(f"  n_bootstrap_: {self.n_bootstrap_}")
         print(f"  generation_decode_mode_config_: {self.generation_decode_mode_config_}")
         self._verbose_print_item("encoder_", self.encoder_)

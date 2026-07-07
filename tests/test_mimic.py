@@ -1063,6 +1063,66 @@ def test_mode_identity_uses_identity_components_and_default_generation_policy():
     assert trace["resolved_generation_decode_mode"].eq("direct").all()
 
 
+def test_generation_embeddings_use_full_data_member_not_bootstrap_average():
+    df = pd.DataFrame(
+        {
+            "x": np.linspace(0.0, 1.0, 18),
+            "label": np.array(["a", "b", "a"] * 6),
+        }
+    )
+    model = MIMIC(
+        columns={
+            "regression": ["x"],
+            "classification": ["label"],
+        },
+        encoder=RandomForestPathEncoder(n_estimators=4, embedding_dim=3, random_state=31),
+        decoder=MixedFeatureDecoder.random_forest(n_estimators=4, random_state=31),
+        n_bootstrap=3,
+        random_state=31,
+    ).fit(df)
+
+    Xp_all = model.global_preprocessor_.transform_all(df)
+    for column, module in model.feature_modules_.items():
+        sl = model.embedding_slices_[column]
+        Xp = Xp_all[:, module.context_indices]
+        full_block = model._to_2d(
+            module.full_member.encoder.transform(Xp),
+            width=module.full_member.embedding_dim,
+        )
+        assert np.allclose(model.train_embeddings_[:, sl], full_block)
+        assert len(module.members) == 3
+
+
+def test_bootstrap_false_skips_bootstrap_members_but_keeps_generation():
+    df = pd.DataFrame(
+        {
+            "x": np.linspace(0.0, 1.0, 18),
+            "label": np.array(["a", "b", "a"] * 6),
+        }
+    )
+    model = MIMIC(
+        columns={
+            "regression": ["x"],
+            "classification": ["label"],
+        },
+        mode="identity",
+        n_bootstrap=5,
+        bootstrap=False,
+        random_state=32,
+    ).fit(df)
+
+    assert model.bootstrap_ is False
+    assert model.n_bootstrap_ == 0
+    assert all(len(module.members) == 0 for module in model.feature_modules_.values())
+    assert all(module.full_member is not None for module in model.feature_modules_.values())
+
+    samples, trace = model.sample(4, return_trace=True)
+    conf = model.confidence(df.head(3), columns=["x", "label"])
+    assert samples.shape == (4, 2)
+    assert trace["trace_type"].eq("embedding").all()
+    assert conf["variance"].fillna(0.0).eq(0.0).all()
+
+
 def test_numeric_mode_and_legacy_level_aliases_resolve_to_modes():
     df = pd.DataFrame(
         {
