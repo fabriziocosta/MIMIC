@@ -275,7 +275,7 @@ class ResNetEncoder(BaseEstimator, TransformerMixin):
             torch.as_tensor(X_arr[train_idx], dtype=torch.float32),
             y_tensor[train_idx],
         )
-        loader = DataLoader(train_ds, batch_size=min(self.batch_size, len(train_ds)), shuffle=True)
+        loader = DataLoader(train_ds, batch_size=self._safe_batch_size(len(train_ds)), shuffle=True)
         best_loss = float("inf")
         best_state = None
         stale_epochs = 0
@@ -327,6 +327,12 @@ class ResNetEncoder(BaseEstimator, TransformerMixin):
         if self.device == "auto":
             return torch.device("cuda" if torch.cuda.is_available() else "cpu")
         return torch.device(self.device)
+
+    def _safe_batch_size(self, n_samples: int) -> int:
+        batch_size = min(int(self.batch_size), int(n_samples))
+        if n_samples > 1 and batch_size > 1 and n_samples % batch_size == 1:
+            batch_size -= 1
+        return max(1, batch_size)
 
     def _as_float32_array(self, X):
         if sparse.issparse(X):

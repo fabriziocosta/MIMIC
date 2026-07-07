@@ -161,7 +161,7 @@ def _aulc(x: np.ndarray, y: np.ndarray) -> float:
     if len(x) == 1:
         return float(y[0])
     order = np.argsort(x)
-    return float(np.trapz(y[order], x[order]) / (x[order][-1] - x[order][0]))
+    return float(np.trapezoid(y[order], x[order]) / (x[order][-1] - x[order][0]))
 
 
 def _bootstrap_ci(values: np.ndarray, *, random_state: int = 0, n_resamples: int = 500) -> tuple[float, float]:

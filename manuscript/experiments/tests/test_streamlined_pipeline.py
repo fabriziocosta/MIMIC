@@ -6,6 +6,7 @@ from streamlined.config import ExperimentConfig, ProfileConfig
 from streamlined.plotting import plot_learning_curves
 from streamlined.preprocessing import fit_preprocess_train_test
 from streamlined.runner import run_condition
+from streamlined.runner import _emit_progress
 from streamlined.sampling import build_balanced_training_set, generated_count_for_balance, make_imbalanced_subset
 
 
@@ -93,3 +94,21 @@ def test_aulc_pairwise_and_plotting():
     fig, ax = plot_learning_curves(results.rename(columns={"roc_auc": "roc_auc"}), dataset_key="d", imbalance_ratio=2.0)
     assert ax.get_xlabel() == "Training size"
     fig.clear()
+
+
+def test_progress_emitter_prints_text_bar(capsys):
+    _emit_progress(
+        1,
+        4,
+        show_progress=True,
+        dataset_key="adult",
+        ratio=2.0,
+        training_size=128,
+        seed=0,
+        method="direct_smote",
+    )
+
+    out = capsys.readouterr().out
+    assert "1/4" in out
+    assert "adult" in out
+    assert "direct_smote" in out

@@ -1154,6 +1154,15 @@ def test_numeric_mode_and_legacy_level_aliases_resolve_to_modes():
     assert legacy.level_ == 0
 
 
+def test_resnet_encoder_safe_batch_size_avoids_singleton_final_batch():
+    encoder = ResNetEncoder(batch_size=32)
+
+    assert encoder._safe_batch_size(33) == 31
+    assert encoder._safe_batch_size(65) == 31
+    assert encoder._safe_batch_size(32) == 32
+    assert encoder._safe_batch_size(2) == 2
+
+
 def test_capacity_scales_preset_hyperparameters():
     low = MIMIC._capacity_parameters(0.0)
     mid = MIMIC._capacity_parameters(0.5)

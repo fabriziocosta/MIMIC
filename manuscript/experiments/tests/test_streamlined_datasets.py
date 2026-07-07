@@ -8,7 +8,8 @@ def test_dataset_registry_contains_selected_keys():
     registry = dataset_registry()
 
     assert {"adult", "bank_marketing", "default_credit"}.issubset(set(registry["key"]))
-    assert {"key", "name", "openml_id", "target", "status"}.issubset(registry.columns)
+    assert {"key", "name", "openml_id", "target", "n_rows", "status"}.issubset(registry.columns)
+    assert registry.set_index("key").loc["adult", "n_rows"] == 48842
 
 
 def test_load_dataset_normalizes_adult_target(monkeypatch):

@@ -19,12 +19,17 @@ from .preprocessing import fit_preprocess_train_test
 from .sampling import build_balanced_training_set, make_imbalanced_subset
 
 
-def run_profile(config_or_path: ExperimentConfig | str | Path, *, run_experiment: bool = True) -> dict[str, pd.DataFrame]:
+def run_profile(
+    config_or_path: ExperimentConfig | str | Path,
+    *,
+    run_experiment: bool = True,
+    show_progress: bool = False,
+) -> dict[str, pd.DataFrame]:
     config = load_config(config_or_path) if not isinstance(config_or_path, ExperimentConfig) else config_or_path
     ensure_artifact_dirs(config)
     paths = artifact_paths(config)
     if run_experiment:
-        raw = run_conditions(config)
+        raw = run_conditions(config, show_progress=show_progress)
         _write_csv(raw, paths["raw_results"])
     else:
         raw = _read_csv(paths["raw_results"], empty_results())
@@ -32,8 +37,11 @@ def run_profile(config_or_path: ExperimentConfig | str | Path, *, run_experiment
     return {"raw_results": raw, **tables}
 
 
-def run_conditions(config: ExperimentConfig) -> pd.DataFrame:
+def run_conditions(config: ExperimentConfig, *, show_progress: bool = False) -> pd.DataFrame:
     rows = []
+    total = _total_conditions(config)
+    completed = 0
+    _emit_progress(completed, total, show_progress=show_progress)
     for dataset_key in config.profile.datasets:
         n_rows = config.profile.dataset_n_rows.get(dataset_key)
         frame = load_dataset(dataset_key, n_rows=n_rows, random_state=0)
@@ -58,6 +66,17 @@ def run_conditions(config: ExperimentConfig) -> pd.DataFrame:
                         random_state=_condition_seed(seed, ratio, training_size),
                     )
                     for method in config.profile.methods:
+                        completed += 1
+                        _emit_progress(
+                            completed,
+                            total,
+                            show_progress=show_progress,
+                            dataset_key=dataset_key,
+                            ratio=ratio,
+                            training_size=training_size,
+                            seed=seed,
+                            method=method,
+                        )
                         rows.append(
                             run_condition(
                                 config,
@@ -136,7 +155,21 @@ def build_analysis_artifacts(config: ExperimentConfig, raw: pd.DataFrame) -> dic
 def artifact_manifest(config: ExperimentConfig) -> pd.DataFrame:
     rows = []
     for key, path in artifact_paths(config).items():
-        rows.append({"artifact": key, "path": str(path), "exists": path.exists()})
+        try:
+            relative_path = path.relative_to(config.artifact_root)
+            base_dir = config.artifact_root
+        except ValueError:
+            relative_path = path.name
+            base_dir = path.parent
+        rows.append(
+            {
+                "artifact": key,
+                "base_dir": str(base_dir),
+                "relative_path": str(relative_path),
+                "path": str(path),
+                "exists": path.exists(),
+            }
+        )
     return pd.DataFrame(rows)
 
 
@@ -178,3 +211,41 @@ def _metadata_columns() -> list[str]:
         "missingness_rate",
         "baseline_roc_auc",
     ]
+
+
+def _total_conditions(config: ExperimentConfig) -> int:
+    return (
+        len(config.profile.datasets)
+        * len(config.profile.seeds)
+        * len(config.profile.imbalance_ratios)
+        * len(config.profile.training_sizes)
+        * len(config.profile.methods)
+    )
+
+
+def _emit_progress(
+    completed: int,
+    total: int,
+    *,
+    show_progress: bool,
+    dataset_key: str | None = None,
+    ratio: float | None = None,
+    training_size: int | None = None,
+    seed: int | None = None,
+    method: str | None = None,
+) -> None:
+    if not show_progress:
+        return
+    try:
+        from IPython.display import clear_output
+    except Exception:
+        clear_output = None
+    if clear_output is not None:
+        clear_output(wait=True)
+    width = 30
+    filled = int(round(width * completed / total)) if total else width
+    bar = "#" * filled + "-" * (width - filled)
+    detail = ""
+    if dataset_key is not None:
+        detail = f" {dataset_key} ratio={ratio:g}:1 n={training_size} seed={seed} method={method}"
+    print(f"[{bar}] {completed}/{total}{detail}", flush=True)

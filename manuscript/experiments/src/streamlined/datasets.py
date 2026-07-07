@@ -18,6 +18,7 @@ class DatasetSpec:
     openml_name: str | None
     openml_version: int | None
     target: str
+    n_rows: int
     minority_value: object | None = None
     categorical_columns: tuple[str, ...] = ()
     numeric_columns: tuple[str, ...] = ()
@@ -67,6 +68,7 @@ DATASETS = {
         openml_name="adult",
         openml_version=2,
         target="class",
+        n_rows=48842,
         minority_value=">50K",
         categorical_columns=ADULT_CATEGORICAL,
         numeric_columns=ADULT_NUMERIC,
@@ -78,6 +80,7 @@ DATASETS = {
         openml_name="Bank_marketing_data_set_UCI",
         openml_version=None,
         target="y",
+        n_rows=45211,
         minority_value="yes",
         categorical_columns=BANK_CATEGORICAL,
         numeric_columns=BANK_NUMERIC,
@@ -89,6 +92,7 @@ DATASETS = {
         openml_name="default-of-credit-card-clients",
         openml_version=None,
         target="y",
+        n_rows=30000,
         minority_value=1,
         categorical_columns=DEFAULT_CATEGORICAL,
         numeric_columns=DEFAULT_NUMERIC,
@@ -106,6 +110,7 @@ def dataset_registry() -> pd.DataFrame:
                 "name": spec.name,
                 "openml_id": spec.openml_id,
                 "target": spec.target,
+                "n_rows": spec.n_rows,
                 "numeric_features": len(spec.numeric_columns),
                 "categorical_features": len(spec.categorical_columns),
                 "status": "ready",
