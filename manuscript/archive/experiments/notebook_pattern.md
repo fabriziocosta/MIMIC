@@ -6,14 +6,14 @@ This captures the working pattern established while building the Q1 notebook. Us
 
 Each experiment should have three parts:
 
-- A thin notebook in `manuscript/experiments/`.
+- A thin notebook in `manuscript/archive/experiments/`.
 - A reusable implementation module in `src/mimic_experiments/`.
 - Focused tests in `tests/`.
 
 For Q2, that likely means:
 
 ```text
-manuscript/experiments/02_q2_adasyn_benchmark.ipynb
+manuscript/archive/experiments/02_q2_adasyn_benchmark.ipynb
 src/mimic_experiments/q2_adasyn.py
 tests/test_q2_adasyn.py
 ```

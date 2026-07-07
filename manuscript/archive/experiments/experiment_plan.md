@@ -6,7 +6,7 @@ Run MIMIC on the same dataset configurations and evaluation protocols used in ma
 
 Rule for every experiment: MIMIC is trained and sampled only inside each paper's training fold or training split. Published competitor numbers are copied as reference targets, and MIMIC is evaluated with the same classifier family and performance metric wherever practical.
 
-Implementation pattern for notebooks and reusable experiment modules is captured in `manuscript/experiments/notebook_pattern.md`. Use that pattern when adding Q2 and later experiment notebooks.
+Implementation pattern for notebooks and reusable experiment modules is captured in `manuscript/archive/experiments/notebook_pattern.md`. This archived copy records the pattern used for the original Q1-Q3 experiment notebooks.
 
 ## Question 1: Can MIMIC Match Classical SMOTE-Style ROC Utility?
 
