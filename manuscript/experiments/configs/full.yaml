@@ -1,0 +1,18 @@
+artifact_dir: "manuscript/experiments/artifacts"
+test_size: 0.3
+n_neighbors: 5
+lambda_range: [0.0, 1.0]
+mimic_mode: "factorised"
+mimic_capacity: 0.25
+equivalence_margin: 0.01
+aulc_segments:
+  early: {"min": null, "max": 512}
+  mid: {"min": 512, "max": 2048}
+profile:
+  name: "full"
+  datasets: ["adult", "bank_marketing", "default_credit"]
+  dataset_n_rows: {}
+  imbalance_ratios: ["2:1", "3:1", "5:1", "10:1"]
+  training_sizes: [256, 512, 1024, 2048, 4096]
+  seeds: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
+  methods: ["real_balanced", "direct_smote", "direct_displacement", "latent_smote", "latent_displacement"]

@@ -1,0 +1,18 @@
+artifact_dir: "manuscript/experiments/artifacts"
+test_size: 0.3
+n_neighbors: 5
+lambda_range: [0.0, 1.0]
+mimic_mode: "factorised"
+mimic_capacity: 0.1
+equivalence_margin: 0.01
+aulc_segments:
+  early: {"min": null, "max": 128}
+  mid: {"min": 128, "max": null}
+profile:
+  name: "smoke"
+  datasets: ["adult", "bank_marketing"]
+  dataset_n_rows: {"adult": 800, "bank_marketing": 800}
+  imbalance_ratios: ["2:1", "5:1"]
+  training_sizes: [128, 256]
+  seeds: [0, 1]
+  methods: ["real_balanced", "direct_smote", "direct_displacement", "latent_smote", "latent_displacement"]
