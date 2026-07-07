@@ -91,6 +91,7 @@ def run_conditions(config: ExperimentConfig, *, show_progress: bool = False, raw
                             config,
                             dataset_key=dataset_key,
                             imbalanced_raw=imbalanced,
+                            train_pool_raw=train,
                             prepared=prepared,
                             method=method,
                             seed=seed,
@@ -111,6 +112,7 @@ def run_condition(
     dataset_key: str,
     imbalanced_raw: pd.DataFrame,
     prepared,
+    train_pool_raw: pd.DataFrame | None = None,
     method: str,
     seed: int,
     ratio: float,
@@ -120,6 +122,7 @@ def run_condition(
     balanced = build_balanced_training_set(
         method,
         imbalanced_raw=imbalanced_raw,
+        train_pool_raw=train_pool_raw,
         prepared=prepared,
         dataset_key=dataset_key,
         random_state=_condition_seed(seed, ratio, training_size, method),

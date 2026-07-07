@@ -35,13 +35,14 @@ def make_imbalanced_subset(train: pd.DataFrame, *, ratio: float, training_size: 
     minority_idx = rng.choice(minority.index.to_numpy(), size=minority_target, replace=False)
     majority_idx = rng.choice(majority.index.to_numpy(), size=majority_target, replace=False)
     subset = pd.concat([majority.loc[majority_idx], minority.loc[minority_idx]], axis=0)
-    return subset.sample(frac=1.0, random_state=random_state).reset_index(drop=True)
+    return subset.sample(frac=1.0, random_state=random_state)
 
 
 def build_balanced_training_set(
     method: str,
     *,
     imbalanced_raw: pd.DataFrame,
+    train_pool_raw: pd.DataFrame | None = None,
     prepared: PreparedData,
     dataset_key: str,
     random_state: int,
@@ -62,7 +63,16 @@ def build_balanced_training_set(
     majority_pos = np.flatnonzero(y_raw == 0)
     deficit = max(0, len(majority_pos) - len(minority_pos))
     if method == "real_balanced":
-        return _real_balanced(X_raw, y_raw, minority_pos, majority_pos, random_state=random_state)
+        return _real_balanced(
+            X_raw,
+            y_raw,
+            minority_pos,
+            majority_pos,
+            imbalanced_raw=imbalanced_raw,
+            train_pool_raw=train_pool_raw,
+            prepared=prepared,
+            random_state=random_state,
+        )
     if deficit == 0:
         return BalancedTrainingSet(X=X_raw, y=y_raw, generated_count=0, real_minority_count=len(minority_pos), real_majority_count=len(majority_pos))
     if method == "direct_smote":
@@ -113,14 +123,68 @@ def repair_preprocessed_samples(X: np.ndarray, prepared: PreparedData) -> np.nda
     return repaired
 
 
-def _real_balanced(X: np.ndarray, y: np.ndarray, minority_pos: np.ndarray, majority_pos: np.ndarray, *, random_state: int) -> BalancedTrainingSet:
+def _real_balanced(
+    X: np.ndarray,
+    y: np.ndarray,
+    minority_pos: np.ndarray,
+    majority_pos: np.ndarray,
+    *,
+    imbalanced_raw: pd.DataFrame,
+    train_pool_raw: pd.DataFrame | None,
+    prepared: PreparedData,
+    random_state: int,
+) -> BalancedTrainingSet:
     rng = np.random.default_rng(random_state)
-    keep = min(len(minority_pos), len(majority_pos))
-    selected_minority = rng.choice(minority_pos, size=keep, replace=False)
-    selected_majority = rng.choice(majority_pos, size=keep, replace=False)
-    selected = np.concatenate([selected_majority, selected_minority])
+    deficit = max(0, len(majority_pos) - len(minority_pos))
+    if deficit == 0:
+        return BalancedTrainingSet(X=X, y=y, generated_count=0, real_minority_count=len(minority_pos), real_majority_count=len(majority_pos))
+
+    extra_minority = _available_extra_minority(imbalanced_raw, train_pool_raw, random_state=random_state)
+    extra_needed = min(deficit, len(extra_minority))
+    extra_X = (
+        transform_frame(
+            prepared.preprocessor,
+            extra_minority.iloc[:extra_needed],
+            numeric_columns=prepared.numeric_columns,
+            categorical_columns=prepared.categorical_columns,
+        )
+        if extra_needed
+        else np.empty((0, X.shape[1]))
+    )
+    total_minority = len(minority_pos) + extra_needed
+    if total_minority >= len(majority_pos):
+        X_balanced = np.vstack([X, extra_X])
+        y_balanced = np.concatenate([y, np.ones(extra_needed, dtype=int)])
+        return BalancedTrainingSet(
+            X=X_balanced,
+            y=y_balanced,
+            generated_count=0,
+            real_minority_count=total_minority,
+            real_majority_count=len(majority_pos),
+        )
+
+    selected_majority = rng.choice(majority_pos, size=total_minority, replace=False)
+    selected = np.concatenate([selected_majority, minority_pos])
     rng.shuffle(selected)
-    return BalancedTrainingSet(X=X[selected], y=y[selected], generated_count=0, real_minority_count=keep, real_majority_count=keep)
+    X_balanced = np.vstack([X[selected], extra_X])
+    y_balanced = np.concatenate([y[selected], np.ones(extra_needed, dtype=int)])
+    return BalancedTrainingSet(
+        X=X_balanced,
+        y=y_balanced,
+        generated_count=0,
+        real_minority_count=total_minority,
+        real_majority_count=total_minority,
+    )
+
+
+def _available_extra_minority(imbalanced_raw: pd.DataFrame, train_pool_raw: pd.DataFrame | None, *, random_state: int) -> pd.DataFrame:
+    if train_pool_raw is None:
+        return imbalanced_raw.iloc[0:0]
+    used_index = set(imbalanced_raw.index)
+    extra = train_pool_raw.loc[
+        train_pool_raw["label"].eq("minority") & ~train_pool_raw.index.isin(used_index)
+    ]
+    return extra.sample(frac=1.0, random_state=random_state)
 
 
 def _direct_generate(

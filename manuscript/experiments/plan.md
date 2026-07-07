@@ -60,7 +60,7 @@ For each dataset, imbalance ratio, training size, and seed:
 2. Split into train and test sets using stratification.
 3. Fit preprocessing on the training split only.
 4. Build a fixed imbalanced training subset from the training split.
-5. For `real_balanced`, construct a 50:50 real-only training set.
+5. For `real_balanced`, keep the same majority rows as the imbalanced subset and top up with additional real minority rows from the training split until the training set is 50:50 whenever enough real minority rows are available. If the train split lacks enough extra minority rows, use all available real minority rows and reduce majority only as a fallback to preserve 50:50 balance.
 6. For synthetic methods, keep the real minority examples fixed and generate enough synthetic minority rows to create a 50:50 training set.
 7. Fit the same downstream classifier for every method.
 8. Evaluate on the unchanged held-out test set.
@@ -172,6 +172,7 @@ Required generated artifacts:
 - Mean learning curves across datasets, grouped by imbalance ratio and method.
 - AULC tables for early, mid, and full regimes.
 - Critical difference diagrams for full and early AULC, overall and by imbalance ratio.
+- Save every generated figure as both PNG and SVG under `manuscript/experiments/artifacts/figures/`.
 - Regime summary table with the best imbalance range, best data-size regime, indistinguishability from real data, latent-vs-direct result, and displacement-vs-SMOTE result for each method.
 - Final prescriptive conclusions written as actionable rules.
 

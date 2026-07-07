@@ -126,22 +126,19 @@ def save_all_figures(learning: pd.DataFrame, rank: pd.DataFrame, output_dir: str
     if not learning.empty:
         for (dataset_key, ratio), _group in learning.groupby(["dataset_key", "imbalance_ratio"]):
             fig, _ax = plot_learning_curves(learning, dataset_key=dataset_key, imbalance_ratio=ratio)
-            path = output / f"{dataset_key}__ratio-{ratio:g}__learning_curve.png"
-            fig.savefig(path, dpi=150)
+            path = output / f"{dataset_key}__ratio-{ratio:g}__learning_curve"
+            paths.extend(_save_figure(fig, path))
             plt.close(fig)
-            paths.append(path)
         for ratio in sorted(learning["imbalance_ratio"].unique()):
             fig, _ax = plot_mean_learning_curves(learning, imbalance_ratio=ratio)
-            path = output / f"mean__ratio-{ratio:g}__learning_curve.png"
-            fig.savefig(path, dpi=150)
+            path = output / f"mean__ratio-{ratio:g}__learning_curve"
+            paths.extend(_save_figure(fig, path))
             plt.close(fig)
-            paths.append(path)
     if not rank.empty:
         fig, _ax = plot_rank_summary(rank, segment="full")
-        path = output / "rank_summary__full.png"
-        fig.savefig(path, dpi=150)
+        path = output / "rank_summary__full"
+        paths.extend(_save_figure(fig, path))
         plt.close(fig)
-        paths.append(path)
     # Critical-difference diagrams need per-block AULC values, so callers should
     # save them separately through save_critical_difference_figures.
     return paths
@@ -155,14 +152,20 @@ def save_critical_difference_figures(aulc: pd.DataFrame, output_dir: str | Path)
         return paths
     for segment in sorted(aulc["segment"].dropna().unique()):
         fig, _ax = plot_critical_difference_diagram(aulc, segment=segment)
-        path = output / f"critical_difference__{segment}.png"
-        fig.savefig(path, dpi=150)
+        path = output / f"critical_difference__{segment}"
+        paths.extend(_save_figure(fig, path))
         plt.close(fig)
-        paths.append(path)
         for ratio in sorted(aulc["imbalance_ratio"].dropna().unique()):
             fig, _ax = plot_critical_difference_diagram(aulc, segment=segment, imbalance_ratio=ratio)
-            path = output / f"critical_difference__{segment}__ratio-{ratio:g}.png"
-            fig.savefig(path, dpi=150)
+            path = output / f"critical_difference__{segment}__ratio-{ratio:g}"
+            paths.extend(_save_figure(fig, path))
             plt.close(fig)
-            paths.append(path)
     return paths
+
+
+def _save_figure(fig, stem: Path) -> list[Path]:
+    png = stem.with_suffix(".png")
+    svg = stem.with_suffix(".svg")
+    fig.savefig(png, dpi=150)
+    fig.savefig(svg)
+    return [png, svg]

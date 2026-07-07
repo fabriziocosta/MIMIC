@@ -3,7 +3,7 @@ import pandas as pd
 
 from streamlined.analysis import aulc_table, pairwise_comparisons
 from streamlined.config import ExperimentConfig, ProfileConfig
-from streamlined.plotting import critical_difference_inputs, plot_critical_difference_diagram, plot_learning_curves
+from streamlined.plotting import critical_difference_inputs, plot_critical_difference_diagram, plot_learning_curves, save_all_figures
 from streamlined.preprocessing import fit_preprocess_train_test
 from streamlined.runner import run_condition
 from streamlined.runner import _emit_progress
@@ -55,6 +55,37 @@ def test_direct_sampling_balances_to_majority_count():
         generated = balanced.X[-balanced.generated_count :, sl]
         assert np.allclose(generated.sum(axis=1), 1.0)
         assert set(np.unique(generated)).issubset({0.0, 1.0})
+
+
+def test_real_balanced_tops_up_minority_from_training_pool():
+    frame = pd.DataFrame(
+        {
+            "x": np.linspace(-1.0, 1.0, 120),
+            "segment": ["low", "high"] * 60,
+            "label": ["minority"] * 60 + ["majority"] * 60,
+        }
+    )
+    imbalanced = make_imbalanced_subset(frame, ratio=3.0, training_size=40, random_state=0)
+    prepared = fit_preprocess_train_test(frame, frame, dataset_key="adult")
+
+    balanced = build_balanced_training_set(
+        "real_balanced",
+        imbalanced_raw=imbalanced,
+        train_pool_raw=frame,
+        prepared=prepared,
+        dataset_key="adult",
+        random_state=0,
+        n_neighbors=3,
+        lambda_range=(0.0, 1.0),
+        mimic_mode="identity",
+        mimic_capacity=0.0,
+    )
+
+    majority = int(np.sum(balanced.y == 0))
+    minority = int(np.sum(balanced.y == 1))
+    assert majority == minority
+    assert majority == int(imbalanced["label"].eq("majority").sum())
+    assert len(balanced.y) == 2 * majority
 
 
 def test_direct_sampling_repair_switch_controls_repair_call(monkeypatch):
@@ -178,6 +209,25 @@ def test_critical_difference_inputs_and_plot():
     fig.clear()
 
 
+def test_save_all_figures_writes_png_and_svg(tmp_path):
+    learning = pd.DataFrame(
+        {
+            "dataset_key": ["d", "d"],
+            "imbalance_ratio": [2.0, 2.0],
+            "training_size": [10, 20],
+            "method": ["a", "a"],
+            "roc_auc": [0.7, 0.8],
+        }
+    )
+    rank = pd.DataFrame({"segment": ["full"], "imbalance_ratio": [2.0], "method": ["a"], "mean_rank": [1.0]})
+
+    paths = save_all_figures(learning, rank, tmp_path)
+
+    suffixes = {path.suffix for path in paths}
+    assert {".png", ".svg"}.issubset(suffixes)
+    assert all(path.exists() for path in paths)
+
+
 def test_progress_emitter_prints_text_bar(capsys):
     _emit_progress(
         1,
@@ -204,7 +254,7 @@ def test_run_profile_resumes_completed_raw_results(tmp_path, monkeypatch):
 
     monkeypatch.setattr(runner, "load_dataset", lambda dataset_key, n_rows=None, random_state=0: frame)
 
-    def fake_run_condition(config, *, dataset_key, imbalanced_raw, prepared, method, seed, ratio, training_size, metadata):
+    def fake_run_condition(config, *, dataset_key, imbalanced_raw, prepared, method, seed, ratio, training_size, metadata, train_pool_raw=None):
         calls.append((dataset_key, ratio, training_size, seed, method))
         return {
             "dataset_key": dataset_key,
