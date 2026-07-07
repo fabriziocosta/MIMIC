@@ -229,6 +229,76 @@ def run_generation_mode_demo(
     }
 
 
+def run_dataset_synthesis_diagnostics(
+    df: pd.DataFrame,
+    *,
+    columns: dict[str, list[str]],
+    mode,
+    capacity: float,
+    random_state: int,
+    n_jobs=None,
+    feature_n_jobs=None,
+    privacy_filter=None,
+    label: str | None = None,
+):
+    """Generate synthetic rows for one mode and build numeric/categorical diagnostics."""
+
+    from mimic import mimic_data
+    from mimic.diagnostics import categorical_feature_plot, pairwise_feature_plot
+
+    regression_columns = list(columns.get("regression", []))
+    classification_columns = list(columns.get("classification", []))
+    synthetic = mimic_data(
+        df,
+        columns=columns,
+        mode=mode,
+        capacity=capacity,
+        random_state=random_state,
+        n_jobs=n_jobs,
+        feature_n_jobs=feature_n_jobs,
+        privacy_filter=privacy_filter,
+    )
+    label = label or f"mode {mode}"
+    summary = pd.DataFrame(
+        {
+            "quantity": ["mode", "privacy_filter", "real_rows", "synthetic_rows", "columns_match"],
+            "value": [mode, privacy_filter is not None and privacy_filter is not False, len(df), len(synthetic), list(df.columns) == list(synthetic.columns)],
+        }
+    )
+    pair_grid = pairwise_feature_plot(
+        df,
+        synthetic,
+        features=regression_columns,
+        log1p_features=["capital-gain", "capital-loss"],
+        original_label="real",
+        generated_label=label,
+        max_rows_per_source=300,
+        random_state=random_state,
+    )
+    pair_grid.fig.suptitle(f"Pairwise numeric feature statistics: real vs {label}", y=1.02)
+    categorical_fig, categorical_axes, categorical_report, categorical_summary = categorical_feature_plot(
+        df,
+        synthetic,
+        features=classification_columns,
+        original_label="real",
+        generated_label=label,
+        top_n=6,
+    )
+    categorical_fig.suptitle(f"Categorical feature proportions: real vs {label}", y=1.01)
+    return {
+        "synthetic": synthetic,
+        "summary": summary,
+        "pair_grid": pair_grid,
+        "categorical_fig": categorical_fig,
+        "categorical_axes": categorical_axes,
+        "categorical_report": categorical_report,
+        "categorical_summary": categorical_summary,
+    }
+
+
+run_adult_synthesis_diagnostics = run_dataset_synthesis_diagnostics
+
+
 def plot_binary_classification_curves(diagnostics, *, size: tuple[float, float] = (5.5, 4)):
     """Plot ROC and precision-recall curves from binary classification diagnostics."""
 

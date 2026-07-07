@@ -43,6 +43,20 @@ synthetic = mimic_data(df, mode="factorised", capacity=0.25)
 of synthetic rows. It is the simplest interface when you only need a sampled
 dataframe.
 
+The manuscript datasets can be loaded with matching MIMIC column roles in one
+call:
+
+```python
+from mimic import load_paper_dataset, mimic_data
+
+df, columns = load_paper_dataset("adult", n_rows=1000, random_state=0)
+synthetic = mimic_data(df, columns=columns)
+```
+
+Available keys are `adult`, `bank_marketing`, and `default_credit`. The returned
+`columns` mapping contains `ignore`, `regression`, and `classification` lists and
+can be passed directly to `MIMIC` or `mimic_data`.
+
 Nearest-neighbor ambiguity filtering is available as an opt-in attribution-risk
 reduction step. It rejects generated embeddings that are too easily associated
 with one training row or generation pair; it is not a formal differential
