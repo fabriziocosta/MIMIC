@@ -7,7 +7,8 @@ from streamlined.plotting import plot_learning_curves
 from streamlined.preprocessing import fit_preprocess_train_test
 from streamlined.runner import run_condition
 from streamlined.runner import _emit_progress
-from streamlined.sampling import build_balanced_training_set, generated_count_for_balance, make_imbalanced_subset
+from streamlined import sampling
+from streamlined.sampling import build_balanced_training_set, generated_count_for_balance, make_imbalanced_subset, repair_preprocessed_samples
 
 
 def make_frame(n=80):
@@ -48,6 +49,64 @@ def test_direct_sampling_balances_to_majority_count():
 
     assert generated_count_for_balance(imbalanced["label"]) == balanced.generated_count
     assert balanced.y.sum() * 2 == len(balanced.y)
+    for sl in prepared.categorical_slices.values():
+        generated = balanced.X[-balanced.generated_count :, sl]
+        assert np.allclose(generated.sum(axis=1), 1.0)
+        assert set(np.unique(generated)).issubset({0.0, 1.0})
+
+
+def test_direct_sampling_repair_switch_controls_repair_call(monkeypatch):
+    frame = make_frame(80)
+    imbalanced = make_imbalanced_subset(frame, ratio=3.0, training_size=40, random_state=0)
+    prepared = fit_preprocess_train_test(frame, frame, dataset_key="adult")
+    calls = []
+
+    def fake_repair(X, prepared_data):
+        calls.append(X.shape)
+        return X
+
+    monkeypatch.setattr(sampling, "repair_preprocessed_samples", fake_repair)
+
+    build_balanced_training_set(
+        "direct_smote",
+        imbalanced_raw=imbalanced,
+        prepared=prepared,
+        dataset_key="adult",
+        random_state=2,
+        n_neighbors=3,
+        lambda_range=(0.25, 0.75),
+        mimic_mode="identity",
+        mimic_capacity=0.0,
+        repair_direct_samples=False,
+    )
+    assert calls == []
+
+    build_balanced_training_set(
+        "direct_smote",
+        imbalanced_raw=imbalanced,
+        prepared=prepared,
+        dataset_key="adult",
+        random_state=2,
+        n_neighbors=3,
+        lambda_range=(0.25, 0.75),
+        mimic_mode="identity",
+        mimic_capacity=0.0,
+        repair_direct_samples=True,
+    )
+    assert calls
+
+
+def test_repair_preprocessed_samples_projects_onehot_blocks():
+    frame = make_frame(20)
+    prepared = fit_preprocess_train_test(frame, frame, dataset_key="adult")
+    sample = np.zeros((2, prepared.X_train.shape[1]))
+    for sl in prepared.categorical_slices.values():
+        sample[:, sl] = [[0.2, 0.8], [0.6, 0.4]]
+
+    repaired = repair_preprocessed_samples(sample, prepared)
+
+    for sl in prepared.categorical_slices.values():
+        assert repaired[:, sl].tolist() == [[0.0, 1.0], [1.0, 0.0]]
 
 
 def test_runner_condition_returns_metric_schema():
@@ -106,9 +165,11 @@ def test_progress_emitter_prints_text_bar(capsys):
         training_size=128,
         seed=0,
         method="direct_smote",
+        started_at=0.0,
     )
 
     out = capsys.readouterr().out
     assert "1/4" in out
+    assert "ETA=" in out
     assert "adult" in out
     assert "direct_smote" in out

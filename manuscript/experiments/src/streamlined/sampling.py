@@ -49,6 +49,7 @@ def build_balanced_training_set(
     lambda_range: tuple[float, float],
     mimic_mode: str,
     mimic_capacity: float,
+    repair_direct_samples: bool = True,
 ) -> BalancedTrainingSet:
     y_raw = imbalanced_raw["label"].eq("minority").astype(int).to_numpy()
     X_raw = transform_frame(
@@ -66,8 +67,12 @@ def build_balanced_training_set(
         return BalancedTrainingSet(X=X_raw, y=y_raw, generated_count=0, real_minority_count=len(minority_pos), real_majority_count=len(majority_pos))
     if method == "direct_smote":
         synthetic = _direct_generate(X_raw, minority_pos, deficit, method="smote", n_neighbors=n_neighbors, lambda_range=lambda_range, random_state=random_state)
+        if repair_direct_samples:
+            synthetic = repair_preprocessed_samples(synthetic, prepared)
     elif method == "direct_displacement":
         synthetic = _direct_generate(X_raw, minority_pos, deficit, method="displacement", n_neighbors=n_neighbors, lambda_range=lambda_range, random_state=random_state)
+        if repair_direct_samples:
+            synthetic = repair_preprocessed_samples(synthetic, prepared)
     elif method in {"latent_smote", "latent_displacement"}:
         synthetic = _latent_generate(
             method,
@@ -93,6 +98,19 @@ def generated_count_for_balance(labels: pd.Series | np.ndarray) -> int:
     majority = int(np.sum(arr == "majority")) if arr.dtype.kind in {"O", "U", "S"} else int(np.sum(arr == 0))
     minority = int(np.sum(arr == "minority")) if arr.dtype.kind in {"O", "U", "S"} else int(np.sum(arr == 1))
     return max(0, majority - minority)
+
+
+def repair_preprocessed_samples(X: np.ndarray, prepared: PreparedData) -> np.ndarray:
+    repaired = np.asarray(X, dtype=float).copy()
+    for sl in prepared.categorical_slices.values():
+        block = repaired[:, sl]
+        if block.shape[1] == 0:
+            continue
+        winners = np.argmax(block, axis=1)
+        block[:] = 0.0
+        block[np.arange(block.shape[0]), winners] = 1.0
+        repaired[:, sl] = block
+    return repaired
 
 
 def _real_balanced(X: np.ndarray, y: np.ndarray, minority_pos: np.ndarray, majority_pos: np.ndarray, *, random_state: int) -> BalancedTrainingSet:

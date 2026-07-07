@@ -24,6 +24,7 @@ class PreparedData:
     numeric_columns: list[str]
     categorical_columns: list[str]
     feature_names: list[str]
+    categorical_slices: dict[str, slice]
 
 
 def fit_preprocess_train_test(
@@ -52,6 +53,7 @@ def fit_preprocess_train_test(
         numeric_columns=numeric,
         categorical_columns=categorical,
         feature_names=_feature_names(preprocess, numeric, categorical),
+        categorical_slices=_categorical_slices(preprocess, numeric, categorical),
     )
 
 
@@ -96,3 +98,19 @@ def _feature_names(preprocessor: ColumnTransformer, numeric: list[str], categori
         return list(preprocessor.get_feature_names_out())
     except Exception:
         return numeric + categorical
+
+
+def _categorical_slices(preprocessor: ColumnTransformer, numeric: list[str], categorical: list[str]) -> dict[str, slice]:
+    slices = {}
+    start = len(numeric)
+    if not categorical:
+        return slices
+    cat_pipeline = preprocessor.named_transformers_.get("categorical")
+    if cat_pipeline is None:
+        return slices
+    onehot = cat_pipeline.named_steps["onehot"]
+    for column, categories in zip(categorical, onehot.categories_):
+        stop = start + len(categories)
+        slices[column] = slice(start, stop)
+        start = stop
+    return slices

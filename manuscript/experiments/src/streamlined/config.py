@@ -49,6 +49,7 @@ class ExperimentConfig:
     lambda_range: tuple[float, float] = (0.0, 1.0)
     mimic_mode: str = "factorised"
     mimic_capacity: float = 0.25
+    repair_direct_samples: bool = True
     equivalence_margin: float = 0.01
     aulc_segments: dict[str, tuple[int | None, int | None]] = field(default_factory=dict)
 
@@ -81,6 +82,7 @@ def load_config(path: str | Path, *, artifact_dir: str | Path | None = None) -> 
         lambda_range=tuple(float(v) for v in data.get("lambda_range", [0.0, 1.0])),
         mimic_mode=str(data.get("mimic_mode", "factorised")),
         mimic_capacity=float(data.get("mimic_capacity", 0.25)),
+        repair_direct_samples=bool(data.get("repair_direct_samples", True)),
         equivalence_margin=float(data.get("equivalence_margin", 0.01)),
         aulc_segments={
             str(k): _parse_segment(v)

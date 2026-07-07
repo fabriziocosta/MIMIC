@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from hashlib import blake2b
+import time
 
 import numpy as np
 import pandas as pd
@@ -41,7 +42,8 @@ def run_conditions(config: ExperimentConfig, *, show_progress: bool = False) -> 
     rows = []
     total = _total_conditions(config)
     completed = 0
-    _emit_progress(completed, total, show_progress=show_progress)
+    started_at = time.monotonic()
+    _emit_progress(completed, total, show_progress=show_progress, started_at=started_at)
     for dataset_key in config.profile.datasets:
         n_rows = config.profile.dataset_n_rows.get(dataset_key)
         frame = load_dataset(dataset_key, n_rows=n_rows, random_state=0)
@@ -76,6 +78,7 @@ def run_conditions(config: ExperimentConfig, *, show_progress: bool = False) -> 
                             training_size=training_size,
                             seed=seed,
                             method=method,
+                            started_at=started_at,
                         )
                         rows.append(
                             run_condition(
@@ -115,6 +118,7 @@ def run_condition(
         lambda_range=config.lambda_range,
         mimic_mode=config.mimic_mode,
         mimic_capacity=config.mimic_capacity,
+        repair_direct_samples=config.repair_direct_samples,
     )
     classifier = HistGradientBoostingClassifier(random_state=seed)
     classifier.fit(balanced.X, balanced.y)
@@ -233,6 +237,7 @@ def _emit_progress(
     training_size: int | None = None,
     seed: int | None = None,
     method: str | None = None,
+    started_at: float | None = None,
 ) -> None:
     if not show_progress:
         return
@@ -248,4 +253,28 @@ def _emit_progress(
     detail = ""
     if dataset_key is not None:
         detail = f" {dataset_key} ratio={ratio:g}:1 n={training_size} seed={seed} method={method}"
-    print(f"[{bar}] {completed}/{total}{detail}", flush=True)
+    timing = _progress_timing(completed, total, started_at)
+    print(f"[{bar}] {completed}/{total}{timing}{detail}", flush=True)
+
+
+def _progress_timing(completed: int, total: int, started_at: float | None) -> str:
+    if started_at is None:
+        return ""
+    elapsed = max(0.0, time.monotonic() - started_at)
+    if completed <= 0:
+        return f" elapsed={_format_duration(elapsed)} ETA=unknown"
+    avg = elapsed / completed
+    remaining = max(0, total - completed)
+    eta = avg * remaining
+    return f" elapsed={_format_duration(elapsed)} avg={_format_duration(avg)}/step ETA={_format_duration(eta)}"
+
+
+def _format_duration(seconds: float) -> str:
+    seconds = max(0, int(round(seconds)))
+    hours, remainder = divmod(seconds, 3600)
+    minutes, secs = divmod(remainder, 60)
+    if hours:
+        return f"{hours:d}h{minutes:02d}m{secs:02d}s"
+    if minutes:
+        return f"{minutes:d}m{secs:02d}s"
+    return f"{secs:d}s"

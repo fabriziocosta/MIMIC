@@ -4,6 +4,7 @@ n_neighbors: 5
 lambda_range: [0.0, 1.0]
 mimic_mode: "factorised"
 mimic_capacity: 0.25
+repair_direct_samples: true
 equivalence_margin: 0.01
 aulc_segments:
   early: {"min": null, "max": 512}

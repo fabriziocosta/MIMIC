@@ -194,6 +194,7 @@ Required generated artifacts:
 ### Phase 3: Sampling Backends
 
 - Implement direct-space SMOTE and direct-space displacement over preprocessed training arrays.
+- Repair direct-space generated samples by default before classifier fitting: each one-hot categorical block is projected back to a valid one-hot category by argmax. Allow this to be disabled with `repair_direct_samples: false` for raw preprocessed-space comparisons.
 - Implement latent-space SMOTE and latent-space displacement through jointly fit MIMIC models.
 - Ensure class-aware sampling restricts neighbours at generation time only.
 - Add tests using synthetic toy datasets where generated sample counts, class labels, and neighbour restrictions are easy to verify.
