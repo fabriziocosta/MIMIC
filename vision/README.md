@@ -159,11 +159,21 @@ of MIMIC.
 - `src/mimic_vision/datasets.py` downloads MNIST, Fashion-MNIST, and CIFAR-10,
   normalizes pixels, vectorizes images, and filters targets. For example,
   `targets=[3, 8]` keeps only images labelled 3 or 8, and `n_per_target=200`
-  keeps at most 200 images for each selected target.
+  keeps at most 200 images for each selected target. It can also serialize the
+  prepared dataset with a readable filename such as
+  `mnist_train_n400_classes-3-8_28x28.pkl`.
 - `src/mimic_vision/visualization.py` computes simple 2D layouts and plots image
   thumbnails without overlap by skipping thumbnails that would collide with
-  already placed images.
+  already placed images. It also supports reference-axis plots: choose three
+  images named `O`, `X`, and `Y`, center vectors at `O`, and project each image
+  onto plot axes where `O-X` is the x-axis and `O-Y` is the y-axis. Projection
+  uses raw flattened pixel vectors by default, with an `embedding` option ready
+  for a future MIMIC image embedding matrix.
 - `notebooks/01_download_and_filter.ipynb` demonstrates dataset download,
-  target filtering, and per-target sampling.
-- `notebooks/02_visualise_2d_images.ipynb` demonstrates PCA or t-SNE layouts
-  with non-overlapping image thumbnails.
+  target filtering, per-target sampling, and serialization.
+- `notebooks/02_fit_mimic_embeddings.ipynb` loads a serialized dataset by
+  filename, fits MIMIC on the flattened image rows, computes embeddings with
+  `transform`, and serializes the embedding matrix.
+- `notebooks/03_visualise_2d_images.ipynb` loads a serialized dataset by
+  filename, optionally loads a serialized embedding artifact, and demonstrates
+  PCA plus reference-axis layouts with non-overlapping image thumbnails.

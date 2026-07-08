@@ -26,6 +26,21 @@ class VisionDataset:
     target_names: dict[int, str]
 
 
+@dataclass(frozen=True)
+class VisionEmbedding:
+    """Container for MIMIC image embeddings and their source metadata."""
+
+    dataset_file: str
+    embeddings: np.ndarray
+    mode: str
+    capacity: float
+    random_state: int
+
+
+SERIALIZED_DATASET_DIR = Path("vision/data/serialized")
+SERIALIZED_EMBEDDING_DIR = Path("vision/data/embeddings")
+
+
 OPENML_DATASETS = {
     "mnist": {
         "openml_name": "mnist_784",
@@ -121,6 +136,105 @@ def load_vision_dataset(
         image_shape=image_shape,
         target_names=target_names,
     )
+
+
+def vision_dataset_filename(dataset: VisionDataset, *, split: str | None = None) -> str:
+    """Return a readable filename for a filtered, vectorized vision dataset."""
+
+    classes = "-".join(str(int(value)) for value in sorted(dataset.y.unique()))
+    shape = "x".join(str(part) for part in dataset.image_shape)
+    split_part = f"_{_clean_filename_part(split)}" if split else ""
+    return f"{dataset.name}{split_part}_n{len(dataset.y)}_classes-{classes}_{shape}.pkl"
+
+
+def save_vision_dataset(
+    dataset: VisionDataset,
+    *,
+    output_dir: str | Path = SERIALIZED_DATASET_DIR,
+    split: str | None = None,
+    filename: str | None = None,
+) -> Path:
+    """Serialize a prepared vision dataset and return the written path."""
+
+    output_path = Path(output_dir)
+    output_path.mkdir(parents=True, exist_ok=True)
+    file_path = output_path / (filename or vision_dataset_filename(dataset, split=split))
+    with file_path.open("wb") as handle:
+        pickle.dump(dataset, handle, protocol=pickle.HIGHEST_PROTOCOL)
+    return file_path
+
+
+def load_serialized_vision_dataset(
+    filename: str | Path,
+    *,
+    input_dir: str | Path = SERIALIZED_DATASET_DIR,
+) -> VisionDataset:
+    """Load a dataset previously written by ``save_vision_dataset``."""
+
+    file_path = Path(filename)
+    if not file_path.is_absolute():
+        file_path = Path(input_dir) / file_path
+    with file_path.open("rb") as handle:
+        dataset = pickle.load(handle)
+    if not isinstance(dataset, VisionDataset):
+        raise TypeError(f"{file_path} does not contain a VisionDataset object.")
+    return dataset
+
+
+def vision_embedding_filename(
+    *,
+    dataset_file: str | Path,
+    embeddings: np.ndarray,
+    mode: str,
+    capacity: float,
+) -> str:
+    """Return a readable filename for a MIMIC image embedding artifact."""
+
+    dataset_stem = Path(dataset_file).stem
+    mode_part = _clean_filename_part(str(mode))
+    capacity_part = str(capacity).replace(".", "p")
+    return f"{dataset_stem}_mimic-{mode_part}_cap{capacity_part}_emb{embeddings.shape[1]}.pkl"
+
+
+def save_vision_embedding(
+    embedding: VisionEmbedding,
+    *,
+    output_dir: str | Path = SERIALIZED_EMBEDDING_DIR,
+    filename: str | None = None,
+) -> Path:
+    """Serialize a prepared MIMIC image embedding artifact."""
+
+    output_path = Path(output_dir)
+    output_path.mkdir(parents=True, exist_ok=True)
+    file_path = output_path / (
+        filename
+        or vision_embedding_filename(
+            dataset_file=embedding.dataset_file,
+            embeddings=embedding.embeddings,
+            mode=embedding.mode,
+            capacity=embedding.capacity,
+        )
+    )
+    with file_path.open("wb") as handle:
+        pickle.dump(embedding, handle, protocol=pickle.HIGHEST_PROTOCOL)
+    return file_path
+
+
+def load_serialized_vision_embedding(
+    filename: str | Path,
+    *,
+    input_dir: str | Path = SERIALIZED_EMBEDDING_DIR,
+) -> VisionEmbedding:
+    """Load a MIMIC image embedding artifact."""
+
+    file_path = Path(filename)
+    if not file_path.is_absolute():
+        file_path = Path(input_dir) / file_path
+    with file_path.open("rb") as handle:
+        embedding = pickle.load(handle)
+    if not isinstance(embedding, VisionEmbedding):
+        raise TypeError(f"{file_path} does not contain a VisionEmbedding object.")
+    return embedding
 
 
 def _normalize_dataset_name(name: str) -> str:
@@ -225,3 +339,7 @@ def _as_feature_frame(flat: np.ndarray, dataset_name: str) -> pd.DataFrame:
     prefix = "px"
     columns = [f"{prefix}_{i:04d}" for i in range(flat.shape[1])]
     return pd.DataFrame(flat, columns=columns)
+
+
+def _clean_filename_part(value: str) -> str:
+    return "".join(char if char.isalnum() or char in {"-", "_"} else "-" for char in value.lower())
