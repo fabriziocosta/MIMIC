@@ -159,9 +159,10 @@ of MIMIC.
 - `src/mimic_vision/datasets.py` downloads MNIST, Fashion-MNIST, and CIFAR-10,
   normalizes pixels, vectorizes images, and filters targets. For example,
   `targets=[3, 8]` keeps only images labelled 3 or 8, and `n_per_target=200`
-  keeps at most 200 images for each selected target. It can also serialize the
-  prepared dataset with a readable filename such as
-  `mnist_train_n400_classes-3-8_28x28.pkl`.
+  keeps at most 200 images for each selected target. `resize_scale` can reduce
+  image side lengths before vectorization; for example, `resize_scale=0.5`
+  turns `28 x 28` into `14 x 14`. It can also serialize the prepared dataset
+  with a readable filename such as `mnist_train_n400_classes-3-8_28x28.pkl`.
 - `src/mimic_vision/visualization.py` computes simple 2D layouts and plots image
   thumbnails without overlap by skipping thumbnails that would collide with
   already placed images. It also supports reference-axis plots: choose three
@@ -177,3 +178,11 @@ of MIMIC.
 - `notebooks/03_visualise_2d_images.ipynb` loads a serialized dataset by
   filename, optionally loads a serialized embedding artifact, and demonstrates
   PCA plus reference-axis layouts with non-overlapping image thumbnails.
+- `notebooks/04_smote_embedding_synthesis.ipynb` loads a serialized dataset,
+  saved MIMIC model, and embedding artifact, selects two neighboring embeddings,
+  interpolates between them, decodes the intermediate embedding, and displays
+  the resynthesized image.
+
+Notebook filename parameters accept either an explicit filename or `"last"`.
+The default `"last"` selects the most recently generated matching dataset,
+embedding, or model artifact from `vision/data/`.

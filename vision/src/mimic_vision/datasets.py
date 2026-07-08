@@ -11,6 +11,7 @@ from typing import Iterable
 
 import numpy as np
 import pandas as pd
+from scipy.ndimage import zoom
 from sklearn.datasets import fetch_openml
 
 
@@ -90,6 +91,7 @@ def load_vision_dataset(
     data_dir: str | Path = "vision/data",
     split: str = "train",
     random_state: int = 0,
+    resize_scale: float = 1.0,
     as_frame: bool = True,
 ) -> VisionDataset:
     """Download, filter, normalize, and vectorize a supported vision dataset.
@@ -110,6 +112,10 @@ def load_vision_dataset(
         standard first 60,000 examples as train and the remaining 10,000 as test.
     random_state:
         Seed used when sampling ``n_per_target``.
+    resize_scale:
+        Side-length resize scale in ``(0, 1]`` applied before vectorization.
+        For example, ``0.5`` turns a ``28 x 28`` image into ``14 x 14`` and a
+        ``32 x 32 x 3`` image into ``16 x 16 x 3``.
     as_frame:
         If true, return ``X`` as a pandas DataFrame. This is convenient for the
         tabular MIMIC estimator.
@@ -124,6 +130,8 @@ def load_vision_dataset(
     keep = _filtered_indices(y, targets=targets, n_per_target=n_per_target, random_state=random_state)
     images = images[keep]
     y = y[keep]
+    images = _resize_images(images, resize_scale=resize_scale)
+    image_shape = tuple(images.shape[1:])
 
     flat = images.reshape(len(images), -1)
     X = _as_feature_frame(flat, normalized_name) if as_frame else flat
@@ -237,6 +245,26 @@ def load_serialized_vision_embedding(
     return embedding
 
 
+def latest_matching_file(directory: str | Path, pattern: str) -> Path:
+    """Return the newest file matching a pattern in a directory."""
+
+    matches = sorted(Path(directory).glob(pattern), key=lambda path: path.stat().st_mtime, reverse=True)
+    if not matches:
+        raise FileNotFoundError(f"No files matching {pattern!r} found in {directory}.")
+    return matches[0]
+
+
+def resolve_artifact_file(filename: str | Path, *, input_dir: str | Path, pattern: str = "*.pkl") -> Path:
+    """Resolve an explicit artifact filename or ``"last"`` in a directory."""
+
+    if str(filename).lower() == "last":
+        return latest_matching_file(input_dir, pattern)
+    file_path = Path(filename)
+    if file_path.is_absolute():
+        return file_path
+    return Path(input_dir) / file_path
+
+
 def _normalize_dataset_name(name: str) -> str:
     normalized = name.lower().replace("-", "_")
     aliases = {
@@ -339,6 +367,22 @@ def _as_feature_frame(flat: np.ndarray, dataset_name: str) -> pd.DataFrame:
     prefix = "px"
     columns = [f"{prefix}_{i:04d}" for i in range(flat.shape[1])]
     return pd.DataFrame(flat, columns=columns)
+
+
+def _resize_images(images: np.ndarray, *, resize_scale: float) -> np.ndarray:
+    scale = float(resize_scale)
+    if not 0.0 < scale <= 1.0:
+        raise ValueError("resize_scale must be greater than 0 and less than or equal to 1.")
+    if scale == 1.0:
+        return images
+
+    height = max(1, int(round(images.shape[1] * scale)))
+    width = max(1, int(round(images.shape[2] * scale)))
+    zoom_factors = (1, height / images.shape[1], width / images.shape[2])
+    if images.ndim == 4:
+        zoom_factors = (*zoom_factors, 1)
+    resized = zoom(images, zoom_factors, order=1)
+    return np.clip(resized, 0.0, 1.0).astype("float32", copy=False)
 
 
 def _clean_filename_part(value: str) -> str:
