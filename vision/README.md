@@ -182,6 +182,15 @@ of MIMIC.
   saved MIMIC model, and embedding artifact, selects two neighboring embeddings,
   interpolates between them, decodes the intermediate embedding, and displays
   the resynthesized image.
+- `notebooks/05_iterated_mimic_embeddings.ipynb` fits an `IteratedMIMIC` stack,
+  saves its top-level embeddings, and persists the fitted iterated model.
+- `notebooks/06_iterated_smote_synthesis.ipynb` interpolates between top-level
+  iterated embeddings and decodes through all levels back to an image.
+
+`IteratedMIMIC` preserves each pixel or feature embedding as a vector block at
+higher levels. A later level predicts the whole previous-level block for a
+pixel or feature at once, rather than treating each embedding dimension as an
+independent scalar target.
 
 Notebook filename parameters accept either an explicit filename or `"last"`.
 The default `"last"` selects the most recently generated matching dataset,

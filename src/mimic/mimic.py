@@ -458,6 +458,16 @@ class MIMIC(BaseEstimator, TransformerMixin):
             start += block.shape[1]
         return np.hstack(parts) if parts else np.empty((len(X), 0))
 
+    def decode(self, H):
+        """Decode embedding rows back into the fitted feature space."""
+
+        check_is_fitted(self, "feature_modules_")
+        H = self._to_2d(H)
+        expected_width = sum(sl.stop - sl.start for sl in self.embedding_slices_.values())
+        if H.shape[1] != expected_width:
+            raise ValueError(f"H must have {expected_width} columns, got {H.shape[1]}")
+        return self._decode_embeddings(H)
+
     def impute(self, X, columns=None, return_confidence: bool = False):
         check_is_fitted(self, "feature_modules_")
         X = self._as_dataframe(X).copy()

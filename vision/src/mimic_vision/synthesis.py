@@ -71,7 +71,10 @@ def synthesize_smote_image(
         raise ValueError("lambda_value must be between 0 and 1.")
 
     embedding = (1.0 - lambda_value) * values[source_index] + lambda_value * values[neighbor_index]
-    decoded = model._decode_embeddings(embedding.reshape(1, -1))
+    if hasattr(model, "decode_embedding"):
+        decoded = model.decode_embedding(embedding.reshape(1, -1))
+    else:
+        decoded = model.decode(embedding.reshape(1, -1))
     vector = decoded.iloc[0].to_numpy(dtype="float32")
     image = np.clip(vector.reshape(image_shape), 0.0, 1.0)
     return SmoteSynthesis(

@@ -15,6 +15,7 @@ from mimic import (
     GenerationPolicy,
     IdentityDecoder,
     IdentityEncoder,
+    IteratedMIMIC,
     LinearMixedFeatureDecoder,
     MIMIC,
     MixedFeatureDecoder,
@@ -129,6 +130,100 @@ def test_mimic_feature_parallel_fit_matches_sequential_structure():
     assert parallel.embedding_slices_ == sequential.embedding_slices_
     assert parallel_sample.shape == sequential_sample.shape
     assert parallel_sample.columns.tolist() == sequential_sample.columns.tolist()
+
+
+def test_mimic_decode_round_trips_embedding_shape():
+    df = make_frame(n=30)
+    model = MIMIC(
+        columns={
+            "ignore": ["id"],
+            "regression": ["age", "income"],
+            "classification": ["segment", "outcome"],
+        },
+        mode="identity",
+        bootstrap=False,
+        random_state=0,
+    ).fit(df)
+
+    embedding = model.transform(df)
+    decoded = model.decode(embedding)
+
+    assert decoded.shape == (len(df), 4)
+    assert decoded.columns.tolist() == ["age", "income", "segment", "outcome"]
+    with pytest.raises(ValueError, match="columns"):
+        model.decode(embedding[:, :-1])
+
+
+def test_iterated_mimic_fit_transform_and_inverse_transform():
+    df = make_frame(n=30)[["age", "income"]]
+    model = IteratedMIMIC(
+        n_steps=2,
+        base_level={
+            "columns": {"ignore": [], "classification": [], "regression": ["age", "income"]},
+            "mode": "identity",
+            "bootstrap": False,
+        },
+        higher_level={"mode": "identity", "bootstrap": False},
+        random_state=0,
+    ).fit(df)
+
+    top = model.transform(df)
+    levels = model.transform_levels(df)
+    decoded = model.inverse_transform(top)
+
+    assert top.shape[0] == len(df)
+    assert len(levels) == 3
+    assert [frame.shape for frame in levels] == model.representation_shapes_
+    assert list(model.models_[1].embedding_slices_) == list(model.models_[0].embedding_slices_)
+    assert decoded.columns.tolist() == ["age", "income"]
+    assert decoded.shape == df.shape
+
+
+def test_iterated_mimic_explicit_levels_override_default_level_specs():
+    df = make_frame(n=25)[["age", "income"]]
+    model = IteratedMIMIC(
+        n_steps=5,
+        levels=[
+            {
+                "columns": {"ignore": [], "classification": [], "regression": ["age", "income"]},
+                "mode": "identity",
+                "bootstrap": False,
+            }
+        ],
+        base_level={"mode": "direct"},
+        higher_level={"mode": "direct"},
+        random_state=0,
+    ).fit(df)
+
+    assert len(model.models_) == 1
+    assert model.level_specs_[0]["mode"] == "identity"
+
+
+def test_iterated_mimic_save_and_load(tmp_path):
+    df = make_frame(n=25)[["age", "income"]]
+    model = IteratedMIMIC(
+        n_steps=1,
+        base_level={
+            "columns": {"ignore": [], "classification": [], "regression": ["age", "income"]},
+            "mode": "identity",
+            "bootstrap": False,
+        },
+        random_state=0,
+    ).fit(df)
+    path = tmp_path / "iterated.joblib"
+
+    model.save(path)
+    loaded = IteratedMIMIC.load(path)
+
+    assert loaded.persistence_metadata_["estimator"] == "IteratedMIMIC"
+    assert loaded.transform(df).shape == model.transform(df).shape
+
+
+def test_iterated_mimic_rejects_invalid_level_configuration():
+    with pytest.raises(ValueError, match="n_steps"):
+        IteratedMIMIC(n_steps=0).fit(make_frame(n=10)[["age", "income"]])
+    with pytest.raises(ValueError, match="levels"):
+        IteratedMIMIC(levels=[]).fit(make_frame(n=10)[["age", "income"]])
 
 
 def test_pairwise_feature_plot_diagonal_histograms_do_not_share_feature_y_axis():

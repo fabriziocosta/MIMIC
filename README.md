@@ -113,6 +113,20 @@ confidence = model.confidence(df)
 synthetic = model.sample(100)
 ```
 
+Embeddings can also be stacked with `IteratedMIMIC`. The first MIMIC model fits
+the original row space, later models fit the previous level's embedding table,
+and `inverse_transform` decodes back through the stack. Later levels preserve
+each feature embedding as one vector block, so a higher level predicts a whole
+feature-embedding vector at once rather than one scalar dimension at a time:
+
+```python
+from mimic import IteratedMIMIC
+
+stack = IteratedMIMIC(n_steps=2, random_state=0).fit(df)
+top_embedding = stack.transform(df)
+reconstructed = stack.inverse_transform(top_embedding)
+```
+
 `columns="auto"` infers roles using simple heuristics: ID-like or near-unique columns are ignored, small integer-valued numeric columns are classification, other numeric columns are regression, and non-numeric columns are classification. For production use, pass an explicit role mapping such as `columns={"ignore": [...], "regression": [...], "classification": [...]}`.
 
 Embedding plots can focus on selected feature embeddings while colouring by raw

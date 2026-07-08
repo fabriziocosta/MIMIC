@@ -241,9 +241,11 @@ class ResNetEncoder(BaseEstimator, TransformerMixin):
             out_dim = len(self.classes_)
             criterion = nn.CrossEntropyLoss()
         else:
-            y_arr = np.asarray(y, dtype=np.float32).reshape(-1, 1)
+            y_arr = np.asarray(y, dtype=np.float32)
+            if y_arr.ndim == 1:
+                y_arr = y_arr.reshape(-1, 1)
             y_tensor = torch.as_tensor(y_arr, dtype=torch.float32)
-            out_dim = 1
+            out_dim = y_arr.shape[1]
             criterion = nn.MSELoss()
 
         indices = np.arange(len(X_arr))
@@ -287,7 +289,7 @@ class ResNetEncoder(BaseEstimator, TransformerMixin):
                 yb = yb.to(self.device_)
                 optimizer.zero_grad()
                 pred = self.model_(xb)
-                loss = criterion(pred, yb if self.task == "classification" else yb.view(-1, 1))
+                loss = criterion(pred, yb if self.task == "classification" else yb)
                 loss.backward()
                 optimizer.step()
 
@@ -320,7 +322,7 @@ class ResNetEncoder(BaseEstimator, TransformerMixin):
             xb = torch.as_tensor(X, dtype=torch.float32, device=self.device_)
             yb = y_tensor.to(self.device_)
             pred = self.model_(xb)
-            loss = criterion(pred, yb if self.task == "classification" else yb.view(-1, 1))
+            loss = criterion(pred, yb if self.task == "classification" else yb)
         return float(loss.detach().cpu().item())
 
     def _resolve_device(self):
