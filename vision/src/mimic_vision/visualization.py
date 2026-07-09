@@ -41,7 +41,14 @@ def compute_2d_embedding(
             perplexity=perplexity,
             random_state=random_state,
         ).fit_transform(values)
-    raise ValueError("method must be 'pca', 'tsne', or 'canonical_mds'")
+    if method == "umap":
+        try:
+            from umap import UMAP
+        except ImportError as exc:
+            raise ImportError("method='umap' requires the optional umap-learn package") from exc
+        n_neighbors = min(15, max(2, len(values) - 1))
+        return UMAP(n_components=2, n_neighbors=n_neighbors, random_state=random_state).fit_transform(values)
+    raise ValueError("method must be 'pca', 'tsne', 'umap', or 'canonical_mds'")
 
 
 def plot_image_embedding(

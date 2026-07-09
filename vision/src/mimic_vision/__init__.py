@@ -19,7 +19,13 @@ from .visualization import (
     plot_reference_images,
     reference_axis_coordinates,
 )
-from .synthesis import SmoteSynthesis, plot_smote_synthesis, select_embedding_neighbors, synthesize_smote_image
+from .synthesis import (
+    SmoteSynthesis,
+    plot_smote_differences,
+    plot_smote_synthesis,
+    select_embedding_neighbors,
+    synthesize_smote_image,
+)
 
 __all__ = [
     "VisionDataset",
@@ -38,6 +44,7 @@ __all__ = [
     "select_embedding_neighbors",
     "SmoteSynthesis",
     "synthesize_smote_image",
+    "plot_smote_differences",
     "plot_smote_synthesis",
     "vision_embedding_filename",
     "vision_dataset_filename",
