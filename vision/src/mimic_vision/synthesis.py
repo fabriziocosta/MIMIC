@@ -100,6 +100,8 @@ def plot_smote_synthesis(
     *,
     labels=None,
     target_names: dict[int, str] | None = None,
+    axes=None,
+    title_fontsize: float | None = None,
     size: tuple[float, float] | None = None,
     figsize: tuple[float, float] = (7, 2.4),
 ):
@@ -114,7 +116,13 @@ def plot_smote_synthesis(
 
     if size is not None:
         figsize = (float(size[0]) * len(panels), float(size[1]))
-    fig, axes = plt.subplots(1, 3, figsize=figsize)
+    if axes is None:
+        fig, axes = plt.subplots(1, 3, figsize=figsize, constrained_layout=True)
+    else:
+        axes = np.asarray(axes).ravel()
+        if len(axes) < len(panels):
+            raise ValueError("axes must contain at least 3 matplotlib axes.")
+        fig = axes[0].figure
     for ax, (name, index, image) in zip(axes, panels):
         display_image = _display_image(image)
         ax.imshow(display_image, cmap="gray" if display_image.ndim == 2 else None)
@@ -123,9 +131,8 @@ def plot_smote_synthesis(
             label = int(label_array[index])
             label_name = target_names.get(label, str(label)) if target_names is not None else str(label)
             title = f"{title}\nlabel: {label_name}"
-        ax.set_title(title)
+        ax.set_title(title, fontsize=title_fontsize)
         ax.axis("off")
-    fig.tight_layout()
     return fig, axes
 
 
@@ -135,6 +142,8 @@ def plot_smote_differences(
     *,
     mode: str = "signed",
     threshold: float = 0.5,
+    axes=None,
+    title_fontsize: float | None = None,
     size: tuple[float, float] | None = None,
     figsize: tuple[float, float] = (5, 2.4),
 ):
@@ -144,13 +153,19 @@ def plot_smote_differences(
     neighbor = _display_image(images[synthesis.neighbor_index])
     smote = _display_image(synthesis.image)
     panels = [
-        ("source vs SMOTE", _image_difference(source, smote, mode=mode, threshold=threshold)),
-        ("neighbor vs SMOTE", _image_difference(neighbor, smote, mode=mode, threshold=threshold)),
+        ("source\nvs SMOTE", _image_difference(source, smote, mode=mode, threshold=threshold)),
+        ("neighbor\nvs SMOTE", _image_difference(neighbor, smote, mode=mode, threshold=threshold)),
     ]
 
     if size is not None:
         figsize = (float(size[0]) * len(panels), float(size[1]))
-    fig, axes = plt.subplots(1, 2, figsize=figsize)
+    if axes is None:
+        fig, axes = plt.subplots(1, 2, figsize=figsize, constrained_layout=True)
+    else:
+        axes = np.asarray(axes).ravel()
+        if len(axes) < len(panels):
+            raise ValueError("axes must contain at least 2 matplotlib axes.")
+        fig = axes[0].figure
     for ax, (title, image) in zip(axes, panels):
         if mode == "signed":
             magnitude = float(np.max(np.abs(image)))
@@ -158,9 +173,8 @@ def plot_smote_differences(
             ax.imshow(image, cmap="bwr_r", norm=norm)
         else:
             ax.imshow(image, cmap="magma" if mode == "absolute" else "gray")
-        ax.set_title(title)
+        ax.set_title(title, fontsize=title_fontsize)
         ax.axis("off")
-    fig.tight_layout()
     return fig, axes
 
 
