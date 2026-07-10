@@ -188,6 +188,32 @@ conditional decoders given the rest of the embedding. This is the default mode
 because it keeps generation stochastic while preserving the modular
 feature-wise design.
 
+Numerical columns can optionally share one feature-conditioned residual
+network. Each target receives a learned feature identity and optional coordinate
+descriptors, while FiLM layers condition the residual blocks. The target value
+is masked before encoding, so each returned feature block remains conditional
+on the rest of the row:
+
+```python
+from mimic import MIMIC, SharedFeatureGroup, SharedResNetEncoder
+
+pixels = SharedFeatureGroup(
+    columns=pixel_columns,
+    coordinates=pixel_coordinates,  # shape: (len(pixel_columns), coordinate_dim)
+    encoder=SharedResNetEncoder(embedding_dim=32),
+    target_chunk_size=64,
+)
+model = MIMIC(
+    columns={"regression": pixel_columns, "classification": [], "ignore": []},
+    shared_feature_groups={"pixels": pixels},
+)
+```
+
+Shared groups currently support numerical regression columns. Ungrouped and
+categorical columns continue to use independent feature modules. Coordinates
+must be finite and supplied in the same order as `columns`; image helpers
+normalize spatial coordinates to `[0, 1]`.
+
 ### `mode="joint"` / `mode=3`
 
 Uses the neural encoder preset with deterministic joint decoding. A shared
@@ -204,8 +230,9 @@ Learning rate is scaled downward in log space as capacity increases.
 Explicit `encoder`, `decoder`, `policy`, `n_bootstrap`, or
 `generation_decode_mode` arguments override the preset where supplied.
 
-Generation uses one encoder-decoder member per feature trained on all observed
-training rows for that feature. Bootstrap members are kept separate and are used
+Independent columns use one encoder-decoder member per feature. Columns declared
+in a shared numerical group instead use one full-data encoder for the group and
+retain target-specific decoders. Bootstrap members are kept separate and are used
 for confidence diagnostics and out-of-bag calibration, not for defining the
 neighbour-search geometry used by `sample()`. Set `bootstrap=False` for
 generation-only runs to skip fitting bootstrap members while still fitting the
@@ -218,13 +245,18 @@ synthetic = model.fit(df).sample(1000)
 
 Parallelism has two layers. `n_jobs` is passed to compatible underlying
 estimators such as random forests, while `feature_n_jobs` parallelizes MIMIC's
-feature-wise module fitting across target columns. Keep only one outer layer
-high at a time: for example, when cross-validation folds are already parallel,
+independent feature-module fitting across target columns. Shared groups train as
+single group-level models and are not split by `feature_n_jobs`. Keep one outer
+layer high at a time: for example, when cross-validation folds are already parallel,
 leave `feature_n_jobs=1`; when fitting one model at a time, increase
 `feature_n_jobs` to train target features concurrently.
 
 Set `verbose=True` to print constructor hyperparameters immediately and fitted
 data/embedding sizes during `fit`.
+
+`show_progress=True` is the default. It displays an overall `MIMIC fit` bar and,
+for shared numerical groups, an epoch bar with validation loss. Set
+`show_progress=False` for quiet batch jobs, tests, or redirected logs.
 
 Calibration is opt-in. When enabled, MIMIC uses out-of-bag bootstrap predictions
 from `fit()` to calibrate confidence outputs. Calibration therefore requires

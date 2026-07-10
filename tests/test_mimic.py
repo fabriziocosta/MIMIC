@@ -973,7 +973,22 @@ def test_calibration_report_records_skipped_columns_when_oob_insufficient():
     assert set(report["status"]).issubset({"fitted", "skipped_insufficient_oob"})
 
 
-def test_verbose_false_is_silent_by_default(capsys):
+def test_show_progress_false_and_verbose_false_are_silent(capsys):
+    df = pd.DataFrame(
+        {
+            "x": [1.0, 1.0, 2.0, 2.0],
+            "label": ["a", "b", "a", "b"],
+        }
+    )
+
+    MIMIC(mode="identity", random_state=0, show_progress=False).fit(df)
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == ""
+
+
+def test_show_progress_is_enabled_by_default(capsys):
     df = pd.DataFrame(
         {
             "x": [1.0, 1.0, 2.0, 2.0],
@@ -983,7 +998,7 @@ def test_verbose_false_is_silent_by_default(capsys):
 
     MIMIC(mode="identity", random_state=0).fit(df)
 
-    assert capsys.readouterr().out == ""
+    assert "MIMIC fit" in capsys.readouterr().err
 
 
 def test_verbose_prints_hyperparameters_and_fitted_sizes(capsys):
@@ -1003,6 +1018,7 @@ def test_verbose_prints_hyperparameters_and_fitted_sizes(capsys):
         capacity=0.25,
         random_state=0,
         verbose=True,
+        show_progress=False,
     )
     init_out = capsys.readouterr().out
     model.fit(df)

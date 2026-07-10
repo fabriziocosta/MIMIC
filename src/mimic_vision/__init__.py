@@ -26,6 +26,7 @@ from .synthesis import (
     select_embedding_neighbors,
     synthesize_smote_image,
 )
+from .groups import vision_feature_group
 
 __all__ = [
     "VisionDataset",
@@ -48,4 +49,5 @@ __all__ = [
     "plot_smote_synthesis",
     "vision_embedding_filename",
     "vision_dataset_filename",
+    "vision_feature_group",
 ]

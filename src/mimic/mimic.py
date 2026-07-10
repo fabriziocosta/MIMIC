@@ -23,9 +23,17 @@ from sklearn.isotonic import IsotonicRegression
 from sklearn.neighbors import NearestNeighbors
 from sklearn.preprocessing import LabelEncoder, OneHotEncoder, StandardScaler
 from sklearn.utils.validation import check_is_fitted
+from tqdm.auto import tqdm
 
 from .decoders import IdentityDecoder, MixedFeatureDecoder, NeuralConditionalSampler
-from .encoders import IdentityEncoder, RandomForestPathEncoder, ResNetEncoder
+from .encoders import (
+    IdentityEncoder,
+    RandomForestPathEncoder,
+    ResNetEncoder,
+    SharedFeatureGroup,
+    SharedResNetEncoder,
+    SharedTargetEncoder,
+)
 from .policies import GenerationPolicy
 
 
@@ -197,6 +205,14 @@ class FeatureModule:
 
 
 @dataclass
+class SharedGroupModule:
+    name: str
+    columns: list[str]
+    full_encoder: SharedResNetEncoder
+    encoders: list[SharedResNetEncoder]
+
+
+@dataclass
 class NearestNeighborPrivacyFilter:
     enabled: bool = True
     k: int = 5
@@ -229,6 +245,8 @@ class MIMIC(BaseEstimator, TransformerMixin):
         classification_calibration: str = "none",
         regression_calibration: str = "none",
         calibration_interval_levels: tuple[float, ...] = (0.8, 0.9, 0.95),
+        shared_feature_groups: dict[str, SharedFeatureGroup] | None = None,
+        show_progress: bool = True,
     ):
         self.columns = columns
         self.encoder = encoder
@@ -247,6 +265,8 @@ class MIMIC(BaseEstimator, TransformerMixin):
         self.classification_calibration = classification_calibration
         self.regression_calibration = regression_calibration
         self.calibration_interval_levels = calibration_interval_levels
+        self.shared_feature_groups = shared_feature_groups
+        self.show_progress = show_progress
         if self.verbose:
             self._verbose_init()
 
@@ -254,6 +274,9 @@ class MIMIC(BaseEstimator, TransformerMixin):
         X = self._as_dataframe(X).copy()
         self._validate_schema(X)
         self._resolve_mode_configuration()
+        self._validate_shared_feature_groups()
+        if not isinstance(self.show_progress, bool):
+            raise ValueError("show_progress must be a bool")
         self._verbose_fit_configuration()
         rng = np.random.default_rng(self.random_state)
         self.train_X_ = X.copy()
@@ -272,6 +295,8 @@ class MIMIC(BaseEstimator, TransformerMixin):
                 raise ValueError(f"Column {column!r} has too few observed rows")
             if task == "classification" and X.loc[observed_mask, column].nunique() < 2:
                 raise ValueError(f"Classification column {column!r} needs at least two observed classes")
+            if column in self.shared_columns_:
+                continue
             if self.bootstrap_:
                 bootstrap_samples = [
                     rng.choice(np.arange(len(observed_indices)), size=len(observed_indices), replace=True)
@@ -289,31 +314,225 @@ class MIMIC(BaseEstimator, TransformerMixin):
         )
         Xp_all = self.global_preprocessor_.transform_all(X)
 
+        fit_progress = tqdm(
+            total=len(feature_specs) + len(self.shared_feature_groups_) + 4,
+            desc="MIMIC fit",
+            disable=not self.show_progress,
+        )
+
         if self.feature_n_jobs in (None, 1):
-            fitted_features = [
-                self._fit_feature_module(X, Xp_all, column=column, bootstrap_samples=bootstrap_samples)
-                for column, bootstrap_samples in feature_specs
-            ]
+            fitted_features = []
+            for column, bootstrap_samples in feature_specs:
+                fit_progress.set_postfix(stage=f"feature {column}")
+                fitted_features.append(
+                    self._fit_feature_module(
+                        X, Xp_all, column=column, bootstrap_samples=bootstrap_samples
+                    )
+                )
+                fit_progress.update(1)
         else:
+            fit_progress.set_postfix(stage="parallel features")
             fitted_features = Parallel(n_jobs=self.feature_n_jobs)(
                 delayed(self._fit_feature_module)(X, Xp_all, column=column, bootstrap_samples=bootstrap_samples)
                 for column, bootstrap_samples in feature_specs
             )
-        self.feature_modules_ = {column: module for column, module, _data in fitted_features}
+            fit_progress.update(len(feature_specs))
+        feature_modules = {column: module for column, module, _data in fitted_features}
         oob_calibration_data = {column: data for column, _module, data in fitted_features}
+        self.shared_group_modules_ = {}
+        for group_name, group in self.shared_feature_groups_.items():
+            fit_progress.set_postfix(stage=f"shared group {group_name}")
+            group_modules, group_module, group_oob = self._fit_shared_group(
+                X, Xp_all, group_name=group_name, group=group, rng=rng
+            )
+            feature_modules.update(group_modules)
+            self.shared_group_modules_[group_name] = group_module
+            oob_calibration_data.update(group_oob)
+            fit_progress.update(1)
+        self.feature_modules_ = {
+            column: feature_modules[column] for column in self.model_columns_
+        }
 
+        fit_progress.set_postfix(stage="training embeddings")
         self.train_embeddings_ = self.transform(X)
+        fit_progress.update(1)
         self.embedding_slices_ = self._embedding_slices_
+        fit_progress.set_postfix(stage="calibration")
         self._fit_calibrators(oob_calibration_data)
+        fit_progress.update(1)
+        fit_progress.set_postfix(stage="conditional decoders")
         self._fit_conditional_samplers()
         if self.generation_decode_mode_config_ == "joint":
+            fit_progress.set_postfix(stage="joint decoder")
             self._fit_joint_decoder()
+        fit_progress.update(1)
         self.generation_decode_mode_ = self._resolve_generation_decode_mode()
         self.policy_ = self._new_policy()
         self.policy_.validate()
+        fit_progress.set_postfix(stage="neighbours")
         self.neighbour_index_ = self._fit_neighbours(self.train_embeddings_)
+        fit_progress.update(1)
+        fit_progress.set_postfix(stage="complete")
+        fit_progress.close()
         self._verbose_fit_summary()
         return self
+
+    def _fit_shared_group(self, X, Xp_all, *, group_name, group, rng):
+        columns = list(group.columns)
+        n_rows = len(X)
+        n_targets = len(columns)
+        target_scalers = {}
+        y_scaled = np.full((n_rows, n_targets), np.nan, dtype=np.float32)
+        for target_index, column in enumerate(columns):
+            observed = X[column].notna().to_numpy()
+            scaler = StandardScaler()
+            values = X.loc[observed, column].astype(float).to_numpy().reshape(-1, 1)
+            scaler.fit(values)
+            y_scaled[observed, target_index] = scaler.transform(values).ravel()
+            target_scalers[column] = scaler
+
+        value_indices = [
+            int(self.global_preprocessor_.numeric_value_indices_[column][0]) for column in columns
+        ]
+        missing_indices = [
+            int(self.global_preprocessor_.missing_indicator_indices_[column][0]) for column in columns
+        ]
+        full_encoder = self._fit_shared_encoder(
+            group,
+            Xp_all,
+            y_scaled,
+            value_indices=value_indices,
+            missing_indices=missing_indices,
+            encoder_index=0,
+            row_ids=np.arange(n_rows),
+        )
+        full_decoders = {}
+        for target_index, column in enumerate(columns):
+            observed_rows = np.flatnonzero(np.isfinite(y_scaled[:, target_index]))
+            embedding = full_encoder.transform_target(Xp_all[observed_rows], target_index)
+            decoder = self._new_decoder()
+            decoder.fit_target(column, "regression", embedding, y_scaled[observed_rows, target_index])
+            full_decoders[column] = decoder
+
+        bootstrap_encoders = []
+        bootstrap_decoders = {column: [] for column in columns}
+        oob_errors = {column: [] for column in columns}
+        oob_predictions = {column: [] for column in columns}
+        oob_true = {column: [] for column in columns}
+        if self.bootstrap_:
+            for bootstrap_index in range(self.n_bootstrap_):
+                sampled_rows = self._shared_bootstrap_rows(y_scaled, rng)
+                encoder = self._fit_shared_encoder(
+                    group,
+                    Xp_all[sampled_rows],
+                    y_scaled[sampled_rows],
+                    value_indices=value_indices,
+                    missing_indices=missing_indices,
+                    encoder_index=bootstrap_index + 1,
+                    row_ids=sampled_rows,
+                )
+                bootstrap_encoders.append(encoder)
+                oob_rows = np.setdiff1d(np.arange(n_rows), np.unique(sampled_rows))
+                for target_index, column in enumerate(columns):
+                    observed_sample = np.isfinite(y_scaled[sampled_rows, target_index])
+                    train_rows = sampled_rows[observed_sample]
+                    embedding = encoder.transform_target(Xp_all[train_rows], target_index)
+                    decoder = self._new_decoder()
+                    decoder.fit_target(column, "regression", embedding, y_scaled[train_rows, target_index])
+                    bootstrap_decoders[column].append(decoder)
+                    observed_oob = oob_rows[np.isfinite(y_scaled[oob_rows, target_index])]
+                    if len(observed_oob):
+                        oob_embedding = encoder.transform_target(Xp_all[observed_oob], target_index)
+                        prediction_scaled = decoder.predict_target(column, oob_embedding).astype(float)
+                        scaler = target_scalers[column]
+                        prediction = self._inverse_regression_target(prediction_scaled, scaler)
+                        true = X.iloc[observed_oob][column].astype(float).to_numpy()
+                        oob_errors[column].extend((prediction - true).tolist())
+                        oob_predictions[column].extend(prediction.tolist())
+                        oob_true[column].extend(true.tolist())
+
+        all_context_indices = np.arange(self.global_preprocessor_.output_dim_, dtype=int)
+        modules = {}
+        calibration = {}
+        for target_index, column in enumerate(columns):
+            full_member = BootstrapMember(
+                encoder=SharedTargetEncoder(full_encoder, target_index),
+                decoder=full_decoders[column],
+                embedding_dim=full_encoder.output_dim_,
+            )
+            members = [
+                BootstrapMember(
+                    encoder=SharedTargetEncoder(encoder, target_index),
+                    decoder=decoder,
+                    embedding_dim=encoder.output_dim_,
+                )
+                for encoder, decoder in zip(bootstrap_encoders, bootstrap_decoders[column])
+            ]
+            errors = oob_errors[column]
+            modules[column] = FeatureModule(
+                target_column=column,
+                task="regression",
+                context_columns=list(self.model_columns_),
+                context_indices=all_context_indices,
+                full_member=full_member,
+                members=members,
+                observed_mask=X[column].notna(),
+                target_scaler=target_scalers[column],
+                bias=float(np.mean(errors)) if errors else 0.0,
+                noise=float(np.var(errors, ddof=1)) if len(errors) > 1 else 0.0,
+            )
+            calibration[column] = {
+                "task": "regression",
+                "predictions": np.asarray(oob_predictions[column], dtype=float),
+                "true": np.asarray(oob_true[column], dtype=float),
+            }
+        return (
+            modules,
+            SharedGroupModule(
+                name=group_name,
+                columns=columns,
+                full_encoder=full_encoder,
+                encoders=bootstrap_encoders,
+            ),
+            calibration,
+        )
+
+    @staticmethod
+    def _shared_bootstrap_rows(y_scaled, rng, max_attempts: int = 100):
+        n_rows = len(y_scaled)
+        for _attempt in range(max_attempts):
+            sampled_rows = rng.choice(np.arange(n_rows), size=n_rows, replace=True)
+            observed_counts = np.isfinite(y_scaled[sampled_rows]).sum(axis=0)
+            if np.all(observed_counts >= 2):
+                return sampled_rows
+        raise ValueError(
+            "Could not draw a row-level shared-group bootstrap with two observed values per target"
+        )
+
+    def _fit_shared_encoder(
+        self,
+        group,
+        X,
+        y,
+        *,
+        value_indices,
+        missing_indices,
+        encoder_index,
+        row_ids,
+    ):
+        encoder = clone(group.encoder)
+        if self.random_state is not None and "random_state" in encoder.get_params():
+            encoder.set_params(random_state=int(self.random_state + encoder_index))
+        return encoder.fit(
+            X,
+            y,
+            value_indices=value_indices,
+            missing_indices=missing_indices,
+            coordinates=group.coordinates,
+            target_chunk_size=group.target_chunk_size,
+            row_ids=row_ids,
+            show_progress=self.show_progress,
+        )
 
     def _fit_feature_module(self, X: pd.DataFrame, Xp_all, *, column: str, bootstrap_samples: list[np.ndarray]):
         task = self._task_for(column)
@@ -1306,6 +1525,51 @@ class MIMIC(BaseEstimator, TransformerMixin):
             raise ValueError(f"Every non-ignored column needs a task: {sorted(unassigned)}")
         if not self.model_columns_:
             raise ValueError("At least one modelled column is required")
+
+    def _validate_shared_feature_groups(self):
+        groups = {} if self.shared_feature_groups is None else self.shared_feature_groups
+        if not isinstance(groups, dict):
+            raise ValueError("shared_feature_groups must be a mapping of names to SharedFeatureGroup objects")
+        shared_columns = set()
+        validated = {}
+        for name, group in groups.items():
+            if not isinstance(name, str) or not name:
+                raise ValueError("shared feature group names must be non-empty strings")
+            if not isinstance(group, SharedFeatureGroup):
+                raise ValueError(f"Shared group {name!r} must be a SharedFeatureGroup")
+            columns = list(group.columns)
+            if not columns:
+                raise ValueError(f"Shared group {name!r} must contain at least one column")
+            if len(columns) != len(set(columns)):
+                raise ValueError(f"Shared group {name!r} contains duplicate columns")
+            unknown = set(columns) - set(self.model_columns_)
+            if unknown:
+                raise ValueError(f"Shared group {name!r} contains unknown columns: {sorted(unknown)}")
+            non_regression = set(columns) - set(self.regression_columns_)
+            if non_regression:
+                raise ValueError(
+                    f"Shared group {name!r} only supports regression columns: {sorted(non_regression)}"
+                )
+            overlap = shared_columns & set(columns)
+            if overlap:
+                raise ValueError(f"Columns cannot appear in multiple shared groups: {sorted(overlap)}")
+            if not isinstance(group.encoder, SharedResNetEncoder):
+                raise ValueError(f"Shared group {name!r} requires a SharedResNetEncoder")
+            coordinates = group.coordinates
+            if coordinates is not None:
+                array = np.asarray(coordinates)
+                if array.ndim != 2 or array.shape[0] != len(columns):
+                    raise ValueError(
+                        f"Shared group {name!r} coordinates must have one row per column"
+                    )
+                if not np.isfinite(array.astype(float)).all():
+                    raise ValueError(f"Shared group {name!r} coordinates must be finite")
+            if not isinstance(group.target_chunk_size, (int, np.integer)) or int(group.target_chunk_size) <= 0:
+                raise ValueError(f"Shared group {name!r} target_chunk_size must be positive")
+            shared_columns.update(columns)
+            validated[name] = group
+        self.shared_feature_groups_ = validated
+        self.shared_columns_ = shared_columns
 
     def _infer_columns(self, X: pd.DataFrame):
         ignore_columns = []

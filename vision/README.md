@@ -49,6 +49,12 @@ This is deliberately simple: MIMIC Vision does not start from convolutional
 assumptions. It first asks how far the row-wise MIMIC framework can go when the
 features happen to be pixels.
 
+The shared vision workflow remains a pure tabular residual MLP. All pixels use
+one `SharedResNetEncoder`; learned pixel identities and normalized Fourier
+row/column coordinates condition its residual blocks through FiLM. RGB data
+also includes a normalized channel coordinate. The target pixel is masked
+before its embedding is computed.
+
 ## Datasets
 
 ### MNIST
@@ -96,23 +102,41 @@ The expected workflow is:
 Conceptually:
 
 ```python
-images = load_images()
+from mimic import MIMIC, SharedResNetEncoder
+from mimic_vision import load_vision_dataset, vision_feature_group
 
-X = images.reshape(len(images), -1)
-X = X.astype("float32") / 255.0
+dataset = load_vision_dataset("mnist", targets=[3, 8], n_per_target=200)
+pixel_group = vision_feature_group(
+    dataset,
+    encoder=SharedResNetEncoder(
+        embedding_dim=32,
+        feature_embedding_dim=8,
+        coordinate_frequencies=4,
+    ),
+    target_chunk_size=64,
+)
+model = MIMIC(
+    columns={
+        "regression": list(dataset.X.columns),
+        "classification": [],
+        "ignore": [],
+    },
+    mode="direct",
+    bootstrap=False,
+    shared_feature_groups={"pixels": pixel_group},
+    random_state=0,
+).fit(dataset.X)
 
-model = MIMIC(mode="factorised", capacity=0.25, random_state=0)
-model.fit(X)
-
-# Use the fitted vision interface to inspect image embeddings.
+embeddings = model.transform(dataset.X)
 generated = model.sample(64)
-
-generated_images = generated.reshape(64, height, width, channels)
+generated_images = generated.to_numpy().reshape(64, *dataset.image_shape)
 ```
 
-The exact embedding API may differ depending on the vision implementation, but
-the data shape is the important part: MIMIC sees images as rows and pixels as
-features.
+`transform()` retains one conditioned embedding block per pixel and concatenates
+the blocks in dataframe column order. With `p` pixels and embedding width `d`,
+the returned matrix has `p * d` columns. The feature identity and coordinates
+condition the shared network; they do not replace the per-pixel blocks with one
+pooled image vector.
 
 ## Generation
 
@@ -163,6 +187,8 @@ of MIMIC.
   image side lengths before vectorization; for example, `resize_scale=0.5`
   turns `28 x 28` into `14 x 14`. It can also serialize the prepared dataset
   with a readable filename such as `mnist_train_n400_classes-3-8_28x28.pkl`.
+- `../src/mimic_vision/groups.py` converts a vectorized `VisionDataset` into a
+  shared numerical feature group with coordinates aligned to flattened pixels.
 - `../src/mimic_vision/visualization.py` computes simple 2D layouts and plots image
   thumbnails without overlap by skipping thumbnails that would collide with
   already placed images. It also supports reference-axis plots: choose three

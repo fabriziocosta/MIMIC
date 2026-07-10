@@ -66,15 +66,19 @@ MIMIC(
     policy=None,
     generation_decode_mode="auto",
     mode="factorised",
+    level=None,
     capacity=0.25,
     n_bootstrap=None,
     bootstrap=True,
     random_state=None,
     n_jobs=None,
+    feature_n_jobs=1,
     verbose=False,
     classification_calibration="none",
     regression_calibration="none",
     calibration_interval_levels=(0.8, 0.9, 0.95),
+    shared_feature_groups=None,
+    show_progress=True,
 )
 ```
 
@@ -156,6 +160,11 @@ raw constructor hyperparameters immediately, and fitting prints the resolved
 mode/capacity configuration plus input, encoded-context, and embedding sizes as
 soon as those fitted values are available.
 
+`show_progress=True` displays progress independently of `verbose`. The outer
+bar covers independent features, shared groups, embedding construction,
+calibration/decoding, and neighbour fitting. `SharedResNetEncoder` also reports
+epochs and validation loss. `show_progress=False` disables both levels.
+
 ### 2.3 Encoder and decoder arguments
 
 `encoder` should be a configured encoder object or encoder alias. `decoder` should be a generalized scikit-style estimator that can fit one target-specific model per feature type. It is not a single regressor or classifier. It is a mixed-feature decoder that learns how to map embeddings back to regression and classification columns separately.
@@ -192,9 +201,40 @@ The initial encoder implementations should be:
 
 * `RandomForestPathEncoder`;
 * `IdentityEncoder`;
-* `ResNetEncoder`.
+* `ResNetEncoder`;
+* `SharedResNetEncoder` for explicitly grouped numerical targets.
 
 `IdentityEncoder` is a special baseline encoder. Unlike ordinary MIMIC encoders, it receives the full modelled row after preprocessing, including the target feature. This is intentional: paired with `IdentityDecoder`, it makes generation operate in the preprocessed original feature space, recovering classical SMOTE-style interpolation and the displacement variant without a learned embedding.
+
+### 2.4 Shared numerical feature groups
+
+`shared_feature_groups` maps group names to `SharedFeatureGroup` configurations.
+Each configuration contains an ordered list of regression columns, one
+`SharedResNetEncoder`, an optional coordinate matrix with one row per column,
+and a positive target-chunk size. A column may occur in at most one shared
+group. Categorical targets are not supported by the shared path.
+
+```python
+pixel_group = SharedFeatureGroup(
+    columns=pixel_columns,
+    coordinates=pixel_coordinates,
+    encoder=SharedResNetEncoder(
+        embedding_dim=32,
+        feature_embedding_dim=8,
+        coordinate_frequencies=4,
+    ),
+    target_chunk_size=64,
+)
+
+model = MIMIC(
+    columns={"regression": pixel_columns, "classification": [], "ignore": []},
+    shared_feature_groups={"pixels": pixel_group},
+)
+```
+
+Coordinates are explicit metadata; core MIMIC does not infer them from column
+names or dataframe attributes. Columns outside shared groups continue through
+the independent fitting path.
 
 ## 3. Fitted Structure
 
@@ -207,6 +247,7 @@ self.ignore_columns_
 self.regression_columns_
 self.classification_columns_
 self.feature_modules_
+self.shared_group_modules_
 self.global_preprocessor_
 self.embedding_index_
 self.train_embeddings_
@@ -236,11 +277,16 @@ self.random_state_
 
 Each feature module is trained only on rows where its target column is not missing. For target column `j`, the training input is the globally encoded modelled row sliced to the module context. Ordinary encoders use all modelled columns except `j`; encoders with `include_target_context=True` use all modelled columns, including `j`.
 
+For a shared column, `FeatureModule` retains its target-specific decoder and a
+lightweight target view of the shared encoder. The fitted neural network itself
+is owned by `shared_group_modules_`, which stores one full-data encoder and the
+group-level bootstrap encoders.
+
 ## 4. Fit Semantics
 
 At the start of fitting, MIMIC fits one global context preprocessor on all modelled columns. It imputes and scales numeric columns, imputes and one-hot encodes categorical columns, appends one missingness indicator per modelled input column, and stores a mapping from each original column to all encoded output indices produced by that column.
 
-For each modelled column `j`:
+For each modelled column `j` outside a shared group:
 
 1. Build a row mask selecting rows where `X[j]` is observed.
 2. Build the context matrix by slicing the global encoded matrix to `FeatureModule.context_indices`.
@@ -260,6 +306,14 @@ for b in range(n_bootstrap):
 ```
 
 The initial implementation can fit one encoder-decoder pair per bootstrap member and combine their predictions at inference time.
+
+Shared groups follow a different fitting loop. MIMIC standardizes every target
+column separately, then trains the group encoder over all observed `(row,
+target-column)` pairs. The expanded pair table is generated in row and target
+chunks rather than stored. Validation is split by original row identity, so a
+row cannot occur in both training and validation. Group bootstraps resample
+whole rows; target-specific decoders are then fitted from the corresponding
+conditioned embeddings. Out-of-bag rows retain their calibration role.
 
 ## 5. Transform Semantics
 
@@ -290,6 +344,11 @@ This gives one deterministic, stable feature-wise embedding per target column
 for nearest-neighbour search and synthetic generation. Bootstrap embeddings are
 kept separate for confidence diagnostics; averaging them into the generation
 geometry is intentionally avoided.
+
+For a shared group, the same full-data neural weights compute every `h_j`, but
+the learned feature indicator and coordinate descriptor change the FiLM
+conditioning for each target. `transform()` preserves the concatenated
+per-column layout and `embedding_slices_` contract used by independent modules.
 
 ## 6. Imputation
 
@@ -784,6 +843,30 @@ The encoder should train with a temporary prediction head for the target column.
 Training should use a validation split when `validation_fraction > 0`. The encoder should track validation loss, stop early after `patience` epochs without improvement, and restore the best checkpoint when `restore_best_checkpoint=True`. `weight_decay` should be passed to the optimizer to regularise the linear layers. Batch normalization should be part of each residual block unless a later implementation exposes it as an explicit option.
 
 The first implementation should keep the PyTorch encoder optional so the package can run with scikit-learn-only dependencies.
+
+### 10.3 SharedResNetEncoder
+
+`SharedResNetEncoder` is a residual MLP, not a convolutional network. It receives
+the complete globally preprocessed row and a target index. Before a target is
+processed, its standardized value is replaced with zero and its missingness
+indicator is set to one. This rule applies during fitting and
+`transform_target`, preventing the target value from leaking through the shared
+input.
+
+The target descriptor concatenates a learned feature embedding with fixed
+Fourier features computed from supplied normalized coordinates. Each residual
+block maps this descriptor to FiLM scale and shift vectors:
+
+$$
+h_{l+1} = h_l + (1 + \gamma_l(q_j)) \odot F_l(h_l) + \beta_l(q_j).
+$$
+
+The network uses a temporary scalar regression head during joint group
+training. After fitting, `transform_target(X, j)` returns the penultimate
+embedding for target `j`; ordinary target-specific MIMIC decoders are fitted on
+those embeddings. `batch_size` limits the number of `(row, target)` pairs in a
+step, while `SharedFeatureGroup.target_chunk_size` limits how many targets are
+expanded together.
 
 ## 11. Decoders
 

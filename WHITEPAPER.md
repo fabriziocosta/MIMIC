@@ -6,7 +6,7 @@
 
 **MIMIC** is a modular machine-learning framework for treating several common tabular-data problems as variations of the same operation: predicting unknown feature values from known feature values.
 
-The central idea is simple. For each feature column, MIMIC learns how that feature can be predicted from all the other features. This creates a family of feature-wise predictive models. Each model contains an encoder, which maps the available information into a latent representation, and a decoder, which predicts the target feature from the latent representations of the other features.
+The central idea is simple. For each feature column, MIMIC learns how that feature can be predicted from all the other features. This creates a family of feature-wise predictive tasks. A task has an encoder view, which maps the available information into a latent representation, and a decoder, which predicts the target feature. Encoder parameters may belong to one feature or be shared by an explicitly declared group of numerical features.
 
 Once trained, the same framework can be used for four related tasks.
 
@@ -18,7 +18,7 @@ Third, it can treat ordinary **supervised learning** as a special case of imputa
 
 Fourth, MIMIC can act as a **synthetic data generator**. By moving through the learned embedding space, either by interpolation between neighbours or by local displacement vectors, the model can generate new plausible instances and decode them back into feature space.
 
-MIMIC is not a single algorithm in the narrow sense. It is a framework. The current implementation provides random-forest and ResNet encoders, together with mixed regression/classification decoders. The defining feature is the organisation of these components into a universal column-wise predictive system with uncertainty-aware imputation and manifold-aware generation.
+MIMIC is not a single algorithm in the narrow sense. It is a framework. The current implementation provides random-forest and residual-network encoders, together with mixed regression/classification decoders. Numerical features may also share a residual network conditioned by feature identity and optional coordinates. The defining feature is the organisation of these components into a column-wise predictive system with uncertainty-aware imputation and embedding-space generation.
 
 ### 2. Background and motivation
 
@@ -70,7 +70,7 @@ $$
 E_j
 $$
 
-is the encoder associated with predicting feature:
+is the encoder view associated with predicting feature:
 
 $$
 j
@@ -110,7 +110,13 @@ Each module contains:
 2. a decoder, which predicts the target feature value;
 3. an uncertainty estimator, usually obtained through an ensemble.
 
-The current implementation provides two encoder families: a random-forest path/leaf encoder and a PyTorch ResNet encoder. The random-forest encoder can expose sparse path or leaf encodings, optionally reduced to a fixed dense dimensionality with truncated SVD. The ResNet encoder exposes a penultimate-layer embedding.
+The implementation provides a random-forest path/leaf encoder and two PyTorch
+residual-network paths. `ResNetEncoder` fits independently for a target.
+`SharedResNetEncoder` shares one residual MLP across a declared group of
+numerical targets and conditions every residual block using a learned feature
+identity and optional Fourier coordinate descriptors. The target value is
+masked before encoding. The shared path retains one embedding block and one
+decoder per target even though the neural weights are shared.
 
 #### 4.2 Global instance representation
 
@@ -161,9 +167,11 @@ directly: the conditional sampler operates on MIMIC's learned representation of 
 
 #### 4.4 Bootstrap ensemble
 
-MIMIC trains a full-data version of each feature-wise module for representation
-learning and generation. It can also train multiple additional versions on
-bootstrapped samples of the data. The bootstrap ensemble produces a distribution
+MIMIC trains full-data encoders and target-specific decoders for representation
+learning and generation. Independent modules own their encoders; a shared
+numerical group owns one encoder used by all targets in that group. MIMIC can
+also train additional versions on bootstrapped samples of the data. The
+bootstrap ensemble produces a distribution
 of predictions:
 
 $$
@@ -603,7 +611,7 @@ A useful distinction is between uncertainty caused by noise in the observations 
 
 Calibration asks whether MIMIC's reported confidence values mean what they claim to mean. If a categorical prediction receives probability 0.8, then predictions made at that confidence level should be correct roughly 80% of the time. If a regression interval is labelled as a 90% interval, then it should contain the observed value roughly 90% of the time on comparable data.
 
-MIMIC supports calibration as an explicit, opt-in part of fitting. The calibration data comes from out-of-bag bootstrap predictions. For each feature-wise module, a bootstrap member is trained on a resampled subset of the observed target rows. Rows not used by that member form an out-of-bag set. These OOB predictions are less optimistic than in-sample predictions and therefore provide a practical calibration signal without requiring a separate held-out calibration table.
+MIMIC supports calibration as an explicit, opt-in part of fitting. The calibration data comes from out-of-bag bootstrap predictions. Independent feature modules resample observed target rows. Shared numerical groups instead resample whole rows once for the group and use the same sampled rows for every target-specific decoder. Rows not used by a member form an out-of-bag set. These OOB predictions are less optimistic than in-sample predictions and therefore provide a practical calibration signal without requiring a separate held-out calibration table.
 
 For categorical targets, MIMIC can calibrate class probabilities by temperature scaling or by one-vs-rest isotonic regression. Temperature scaling learns a single scalar that softens or sharpens predicted class probabilities. Isotonic regression learns a monotone calibration map for each class and then renormalizes the calibrated probabilities so that they sum to one. Calibrated probabilities are used by `confidence()`, affecting reported probability dictionaries, predicted probability, entropy, and probability margins.
 

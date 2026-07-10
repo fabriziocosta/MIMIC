@@ -36,6 +36,7 @@ class VisionEmbedding:
     mode: str
     capacity: float
     random_state: int
+    group_config: dict | None = None
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -245,6 +246,8 @@ def load_serialized_vision_embedding(
         embedding = pickle.load(handle)
     if not isinstance(embedding, VisionEmbedding):
         raise TypeError(f"{file_path} does not contain a VisionEmbedding object.")
+    if not hasattr(embedding, "group_config"):
+        object.__setattr__(embedding, "group_config", None)
     return embedding
 
 

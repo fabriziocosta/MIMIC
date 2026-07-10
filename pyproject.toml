@@ -16,6 +16,7 @@ dependencies = [
     "scikit-learn",
     "matplotlib",
     "torch",
+    "tqdm",
 ]
 
 [project.scripts]
