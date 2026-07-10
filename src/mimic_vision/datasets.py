@@ -38,8 +38,11 @@ class VisionEmbedding:
     random_state: int
 
 
-SERIALIZED_DATASET_DIR = Path("vision/data/serialized")
-SERIALIZED_EMBEDDING_DIR = Path("vision/data/embeddings")
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+VISION_DATA_DIR = PROJECT_ROOT / "data" / "vision"
+RAW_DATA_DIR = VISION_DATA_DIR / "raw"
+SERIALIZED_DATASET_DIR = VISION_DATA_DIR / "serialized"
+SERIALIZED_EMBEDDING_DIR = VISION_DATA_DIR / "embeddings"
 
 
 OPENML_DATASETS = {
@@ -88,7 +91,7 @@ def load_vision_dataset(
     *,
     targets: Iterable[int] | None = None,
     n_per_target: int | None = None,
-    data_dir: str | Path = "vision/data",
+    data_dir: str | Path = RAW_DATA_DIR,
     split: str = "train",
     random_state: int = 0,
     resize_scale: float = 1.0,
@@ -285,7 +288,7 @@ def _load_openml_dataset(name: str, data_dir: Path, split: str):
     bunch = fetch_openml(
         spec["openml_name"],
         version=spec["version"],
-        data_home=str(data_dir / "openml"),
+        data_home=str(data_dir),
         as_frame=False,
         parser="auto",
     )
