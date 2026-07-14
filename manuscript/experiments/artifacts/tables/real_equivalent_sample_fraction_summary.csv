@@ -1,0 +1,5 @@
+method,metric,mean_real_equivalent_fraction,median_real_equivalent_fraction,n
+direct_displacement,roc_auc,0.4910114618917908,0.5234160097141218,36
+latent_displacement,roc_auc,0.484786899886756,0.4955373609277862,33
+latent_smote,roc_auc,0.47629868869767883,0.4969283328400975,34
+direct_smote,roc_auc,0.4644148123613312,0.48245046341101633,35

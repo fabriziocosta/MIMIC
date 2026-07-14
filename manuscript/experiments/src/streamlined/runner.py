@@ -11,7 +11,16 @@ import pandas as pd
 from sklearn.ensemble import HistGradientBoostingClassifier
 from sklearn.model_selection import train_test_split
 
-from .analysis import aulc_table, learning_curves, pairwise_comparisons, prescriptive_conclusions, rank_summary, regime_summary
+from .analysis import (
+    aulc_table,
+    learning_curves,
+    pairwise_comparisons,
+    prescriptive_conclusions,
+    rank_summary,
+    real_equivalent_sample_fraction,
+    real_equivalent_summary,
+    regime_summary,
+)
 from .config import ExperimentConfig, artifact_paths, ensure_artifact_dirs, load_config
 from .datasets import dataset_metadata, dataset_registry, load_dataset
 from .metrics import empty_results, evaluate_binary_classifier, result_schema
@@ -157,16 +166,29 @@ def build_analysis_artifacts(config: ExperimentConfig, raw: pd.DataFrame) -> dic
     aulc = aulc_table(raw, config)
     pairwise = pairwise_comparisons(aulc, config) if not aulc.empty else pd.DataFrame()
     rank = rank_summary(aulc)
+    real_equivalence = real_equivalent_sample_fraction(learning)
+    real_equivalence_summary = real_equivalent_summary(real_equivalence)
     regime = regime_summary(aulc, pairwise)
     _write_csv(learning, paths["learning_curves"])
     _write_csv(aulc, paths["aulc"])
     _write_csv(pairwise, paths["pairwise"])
+    _write_csv(real_equivalence, paths["real_equivalence"])
+    _write_csv(real_equivalence_summary, paths["real_equivalence_summary"])
     _write_csv(regime, paths["regime"])
     _write_csv(rank, paths["rank"])
     paths["conclusions"].write_text(prescriptive_conclusions(regime))
     save_all_figures(learning, rank, paths["figures"])
     save_critical_difference_figures(aulc, paths["figures"])
-    return {"learning_curves": learning, "aulc": aulc, "pairwise": pairwise, "regime": regime, "rank": rank, "registry": dataset_registry()}
+    return {
+        "learning_curves": learning,
+        "aulc": aulc,
+        "pairwise": pairwise,
+        "real_equivalence": real_equivalence,
+        "real_equivalence_summary": real_equivalence_summary,
+        "regime": regime,
+        "rank": rank,
+        "registry": dataset_registry(),
+    }
 
 
 def artifact_manifest(config: ExperimentConfig) -> pd.DataFrame:

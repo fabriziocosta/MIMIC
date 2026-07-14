@@ -90,6 +90,72 @@ def rank_summary(aulc: pd.DataFrame) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def real_equivalent_sample_fraction(
+    curves: pd.DataFrame,
+    *,
+    baseline_method: str = "real_balanced",
+    metric: str = "roc_auc",
+) -> pd.DataFrame:
+    columns = [
+        "dataset_key",
+        "imbalance_ratio",
+        "method",
+        "training_size",
+        "metric",
+        "method_score",
+        "real_equivalent_size",
+        "real_equivalent_fraction",
+    ]
+    if curves.empty or metric not in curves.columns:
+        return pd.DataFrame(columns=columns)
+    rows = []
+    keys = ["dataset_key", "imbalance_ratio"]
+    for (dataset_key, ratio), group in curves.groupby(keys):
+        real = group.loc[group["method"].eq(baseline_method), ["training_size", metric]].dropna()
+        real = _strict_real_curve(real, metric=metric)
+        if len(real) < 2:
+            continue
+        score_min = float(real[metric].min())
+        score_max = float(real[metric].max())
+        for _, row in group.loc[~group["method"].eq(baseline_method)].iterrows():
+            method_score = _finite_float(row.get(metric))
+            training_size = _finite_float(row.get("training_size"))
+            if not np.isfinite(method_score) or not np.isfinite(training_size) or float(training_size) <= 0:
+                continue
+            if method_score < score_min or method_score > score_max:
+                continue
+            equivalent_size = float(np.interp(method_score, real[metric].to_numpy(), real["training_size"].to_numpy()))
+            rows.append(
+                {
+                    "dataset_key": dataset_key,
+                    "imbalance_ratio": ratio,
+                    "method": row["method"],
+                    "training_size": int(training_size),
+                    "metric": metric,
+                    "method_score": method_score,
+                    "real_equivalent_size": equivalent_size,
+                    "real_equivalent_fraction": equivalent_size / training_size,
+                }
+            )
+    return pd.DataFrame(rows, columns=columns)
+
+
+def real_equivalent_summary(equivalence: pd.DataFrame) -> pd.DataFrame:
+    columns = ["method", "metric", "mean_real_equivalent_fraction", "median_real_equivalent_fraction", "n"]
+    if equivalence.empty:
+        return pd.DataFrame(columns=columns)
+    return (
+        equivalence.groupby(["method", "metric"], as_index=False)
+        .agg(
+            mean_real_equivalent_fraction=("real_equivalent_fraction", "mean"),
+            median_real_equivalent_fraction=("real_equivalent_fraction", "median"),
+            n=("real_equivalent_fraction", "size"),
+        )
+        .sort_values("mean_real_equivalent_fraction", ascending=False)
+        .reset_index(drop=True)
+    )
+
+
 def regime_summary(aulc: pd.DataFrame, pairwise: pd.DataFrame) -> pd.DataFrame:
     rows = []
     if aulc.empty:
@@ -163,6 +229,21 @@ def _aulc(x: np.ndarray, y: np.ndarray) -> float:
         return float(y[0])
     order = np.argsort(x)
     return float(np.trapezoid(y[order], x[order]) / (x[order][-1] - x[order][0]))
+
+
+def _strict_real_curve(real: pd.DataFrame, *, metric: str) -> pd.DataFrame:
+    ordered = real.sort_values("training_size")
+    ordered = ordered.groupby("training_size", as_index=False)[metric].mean()
+    ordered[metric] = ordered[metric].cummax()
+    ordered = ordered.groupby(metric, as_index=False)["training_size"].min()
+    return ordered.sort_values(metric)
+
+
+def _finite_float(value) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return float("nan")
 
 
 def _bootstrap_ci(values: np.ndarray, *, random_state: int = 0, n_resamples: int = 500) -> tuple[float, float]:

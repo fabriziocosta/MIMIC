@@ -1,7 +1,7 @@
 import numpy as np
 import pandas as pd
 
-from streamlined.analysis import aulc_table, pairwise_comparisons
+from streamlined.analysis import aulc_table, pairwise_comparisons, real_equivalent_sample_fraction, real_equivalent_summary
 from streamlined.config import ExperimentConfig, ProfileConfig
 from streamlined.plotting import critical_difference_inputs, generate_critical_difference_diagram, plot_learning_curves, save_all_figures
 from streamlined.preprocessing import fit_preprocess_train_test
@@ -186,6 +186,27 @@ def test_aulc_pairwise_and_plotting():
     fig, ax = plot_learning_curves(results.rename(columns={"roc_auc": "roc_auc"}), dataset_key="d", imbalance_ratio=2.0)
     assert ax.get_xlabel() == "Training size"
     fig.clear()
+
+
+def test_real_equivalent_sample_fraction_interpolates_against_real_curve():
+    curves = pd.DataFrame(
+        {
+            "dataset_key": ["d"] * 6,
+            "imbalance_ratio": [2.0] * 6,
+            "training_size": [100, 200, 400, 100, 200, 400],
+            "method": ["real_balanced", "real_balanced", "real_balanced", "latent_smote", "latent_smote", "latent_smote"],
+            "roc_auc": [0.60, 0.70, 0.90, 0.60, 0.70, 0.80],
+        }
+    )
+
+    equivalence = real_equivalent_sample_fraction(curves)
+    summary = real_equivalent_summary(equivalence)
+
+    row_400 = equivalence.loc[equivalence["training_size"].eq(400)].iloc[0]
+    assert np.isclose(row_400["real_equivalent_size"], 300)
+    assert np.isclose(row_400["real_equivalent_fraction"], 0.75)
+    assert summary.loc[0, "method"] == "latent_smote"
+    assert summary.loc[0, "n"] == 3
 
 
 def test_critical_difference_inputs_and_plot():

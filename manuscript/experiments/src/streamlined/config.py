@@ -20,6 +20,8 @@ ARTIFACT_FILENAMES = {
     "learning_curves": Path("tables") / "learning_curves.csv",
     "aulc": Path("tables") / "aulc.csv",
     "pairwise": Path("tables") / "pairwise_comparisons.csv",
+    "real_equivalence": Path("tables") / "real_equivalent_sample_fraction.csv",
+    "real_equivalence_summary": Path("tables") / "real_equivalent_sample_fraction_summary.csv",
     "regime": Path("tables") / "regime_summary.csv",
     "rank": Path("tables") / "rank_summary.csv",
     "conclusions": Path("reports") / "prescriptive_conclusions.md",

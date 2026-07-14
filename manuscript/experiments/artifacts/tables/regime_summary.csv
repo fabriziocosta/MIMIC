@@ -1,6 +1,6 @@
 method,best_segment,best_imbalance_ratio,mean_full_aulc,indistinguishable_from_real
-real_balanced,full,2.0,0.8923356626376446,False
-direct_smote,full,2.0,0.8920539983209519,True
-direct_displacement,full,2.0,0.8921964256563023,True
-latent_smote,full,2.0,0.8906189106700231,True
-latent_displacement,full,2.0,0.8925304098272367,True
+real_balanced,full,10.0,0.8596106172967068,False
+direct_smote,full,2.0,0.8375064980594239,True
+direct_displacement,full,2.0,0.839249912612838,True
+latent_smote,full,2.0,0.8353972856748553,True
+latent_displacement,full,2.0,0.836309999119417,True
