@@ -1,9 +1,9 @@
 import numpy as np
 import pandas as pd
 
-from streamlined.analysis import aulc_table, pairwise_comparisons, real_equivalent_sample_fraction, real_equivalent_summary
+from streamlined.analysis import aulc_table, learning_curves, pairwise_comparisons, real_equivalent_sample_fraction, real_equivalent_summary
 from streamlined.config import ExperimentConfig, ProfileConfig
-from streamlined.plotting import critical_difference_inputs, generate_critical_difference_diagram, plot_learning_curves, save_all_figures
+from streamlined.plotting import critical_difference_inputs, generate_critical_difference_diagram, plot_learning_curves, plot_real_equivalent_by_dataset, save_all_figures
 from streamlined.preprocessing import fit_preprocess_train_test
 from streamlined.runner import run_condition
 from streamlined.runner import _emit_progress
@@ -180,11 +180,19 @@ def test_aulc_pairwise_and_plotting():
 
     aulc = aulc_table(results, config)
     pairwise = pairwise_comparisons(aulc, config)
+    curves = learning_curves(results)
 
     assert {"segment", "aulc"}.issubset(aulc.columns)
     assert {"left_method", "right_method", "mean_delta"}.issubset(pairwise.columns)
-    fig, ax = plot_learning_curves(results.rename(columns={"roc_auc": "roc_auc"}), dataset_key="d", imbalance_ratio=2.0)
+    assert {"roc_auc", "roc_auc_std"}.issubset(curves.columns)
+    assert np.isclose(curves.loc[curves["method"].eq("real_balanced"), "roc_auc_std"].iloc[0], np.std([0.8, 0.82], ddof=1))
+    fig, ax = plot_learning_curves(curves, dataset_key="d", imbalance_ratio=2.0)
     assert ax.get_xlabel() == "Training size"
+    assert ax.get_legend_handles_labels()[1] == [
+        "direct_smote (real equivalent: n/a)",
+        "real_balanced (real equivalent: 1.00)",
+    ]
+    assert len(ax.containers) == 2
     fig.clear()
 
 
@@ -207,6 +215,16 @@ def test_real_equivalent_sample_fraction_interpolates_against_real_curve():
     assert np.isclose(row_400["real_equivalent_fraction"], 0.75)
     assert summary.loc[0, "method"] == "latent_smote"
     assert summary.loc[0, "n"] == 3
+
+    fig, ax = plot_real_equivalent_by_dataset(equivalence, imbalance_ratio=2.0)
+    assert ax.get_ylabel() == "Mean real-equivalent fraction (±1 SD across training sizes)"
+    assert ax.get_legend_handles_labels()[1] == ["latent_smote"]
+    assert len(ax.patches) == 1
+    assert len(ax.containers) == 2
+    assert not any(line.get_linestyle() == "--" for line in ax.lines)
+    assert any(line.get_visible() for line in ax.get_ygridlines())
+    assert ax.get_legend()._loc == 9
+    fig.clear()
 
 
 def test_critical_difference_inputs_and_plot():

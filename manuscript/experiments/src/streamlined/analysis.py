@@ -12,8 +12,17 @@ def learning_curves(results: pd.DataFrame) -> pd.DataFrame:
     if results.empty:
         return pd.DataFrame()
     group = ["dataset_key", "imbalance_ratio", "training_size", "method"]
-    metrics = ["roc_auc", "pr_auc", "balanced_accuracy", "f1", "brier"]
-    return results.groupby(group, as_index=False)[metrics].mean()
+    metrics = [
+        metric
+        for metric in ["roc_auc", "pr_auc", "balanced_accuracy", "f1", "brier"]
+        if metric in results.columns
+    ]
+    aggregated = results.groupby(group, as_index=False)[metrics].agg(["mean", "std"])
+    aggregated.columns = [
+        *group,
+        *(name if statistic == "mean" else f"{name}_std" for name, statistic in aggregated.columns[len(group):]),
+    ]
+    return aggregated
 
 
 def aulc_table(results: pd.DataFrame, config: ExperimentConfig) -> pd.DataFrame:

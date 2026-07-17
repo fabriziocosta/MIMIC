@@ -9,6 +9,11 @@ import numpy as np
 import pandas as pd
 import scikit_posthocs as sp
 
+from .analysis import real_equivalent_sample_fraction
+
+
+REAL_BASELINE_METHOD = "real_balanced"
+
 
 def plot_learning_curves(learning: pd.DataFrame, *, dataset_key: str, imbalance_ratio: float):
     fig, ax = plt.subplots(figsize=(7, 4))
@@ -16,12 +21,22 @@ def plot_learning_curves(learning: pd.DataFrame, *, dataset_key: str, imbalance_
         learning["dataset_key"].eq(dataset_key)
         & learning["imbalance_ratio"].eq(imbalance_ratio)
     ]
+    equivalent_fractions = _mean_real_equivalent_fractions(selected)
     for method, group in selected.groupby("method"):
         group = group.sort_values("training_size")
-        ax.plot(group["training_size"], group["roc_auc"], marker="o", label=method)
+        ax.errorbar(
+            group["training_size"],
+            group["roc_auc"],
+            yerr=_roc_auc_std(group),
+            marker="o",
+            capsize=3,
+            label=_learning_curve_label(method, equivalent_fractions),
+        )
     ax.set_title(f"{dataset_key}: ROC-AUC learning curve ({imbalance_ratio}:1)")
     ax.set_xlabel("Training size")
     ax.set_ylabel("ROC-AUC")
+    ax.set_axisbelow(True)
+    ax.grid(axis="y", alpha=0.25)
     ax.legend(fontsize="small")
     fig.tight_layout()
     return fig, ax
@@ -30,14 +45,65 @@ def plot_learning_curves(learning: pd.DataFrame, *, dataset_key: str, imbalance_
 def generate_mean_learning_curves(learning: pd.DataFrame, *, imbalance_ratio: float):
     fig, ax = plt.subplots(figsize=(7, 4))
     selected = learning.loc[learning["imbalance_ratio"].eq(imbalance_ratio)]
-    mean = selected.groupby(["training_size", "method"], as_index=False)["roc_auc"].mean()
+    aggregations = {"roc_auc": "mean"}
+    if "roc_auc_std" in selected.columns:
+        aggregations["roc_auc_std"] = _root_mean_square
+    mean = selected.groupby(["training_size", "method"], as_index=False).agg(aggregations)
+    equivalent_fractions = _mean_real_equivalent_fractions(selected)
     for method, group in mean.groupby("method"):
         group = group.sort_values("training_size")
-        ax.plot(group["training_size"], group["roc_auc"], marker="o", label=method)
+        ax.errorbar(
+            group["training_size"],
+            group["roc_auc"],
+            yerr=_roc_auc_std(group),
+            marker="o",
+            capsize=3,
+            label=_learning_curve_label(method, equivalent_fractions),
+        )
     ax.set_title(f"Mean ROC-AUC learning curve ({imbalance_ratio}:1)")
     ax.set_xlabel("Training size")
     ax.set_ylabel("ROC-AUC")
+    ax.set_axisbelow(True)
+    ax.grid(axis="y", alpha=0.25)
     ax.legend(fontsize="small")
+    fig.tight_layout()
+    return fig, ax
+
+
+def plot_real_equivalent_by_dataset(
+    equivalence: pd.DataFrame,
+    *,
+    imbalance_ratio: float | None = None,
+):
+    """Plot mean real-equivalent fractions grouped by dataset and method."""
+    selected = equivalence
+    if imbalance_ratio is not None:
+        selected = selected.loc[selected["imbalance_ratio"].eq(imbalance_ratio)]
+    grouped = selected.groupby(["dataset_key", "method"])["real_equivalent_fraction"]
+    summary = grouped.mean().unstack("method")
+    errors = grouped.std().unstack("method").reindex_like(summary).fillna(0.0)
+    fig, ax = plt.subplots(figsize=(max(7, 1.5 * len(summary.index)), 4))
+    if summary.empty:
+        ax.set_axis_off()
+        ax.set_title("Real-equivalent fraction: no data")
+        return fig, ax
+    summary.plot.bar(ax=ax, yerr=errors, capsize=3)
+    title = "Mean real-equivalent fraction by dataset and method"
+    if imbalance_ratio is not None:
+        title += f" ({imbalance_ratio}:1)"
+    ax.set_title(title)
+    ax.set_xlabel("Dataset")
+    ax.set_ylabel("Mean real-equivalent fraction (±1 SD across training sizes)")
+    ax.set_axisbelow(True)
+    ax.grid(axis="y", alpha=0.25)
+    ax.tick_params(axis="x", rotation=0)
+    ax.legend(
+        title="Method",
+        fontsize="small",
+        loc="upper center",
+        bbox_to_anchor=(0.5, -0.22),
+        ncol=max(1, len(summary.columns)),
+    )
     fig.tight_layout()
     return fig, ax
 
@@ -93,6 +159,34 @@ def critical_difference_inputs(selected_aulc: pd.DataFrame) -> tuple[pd.Series, 
 
 def plot_mean_learning_curves(learning: pd.DataFrame, *, imbalance_ratio: float):
     return generate_mean_learning_curves(learning, imbalance_ratio=imbalance_ratio)
+
+
+def _mean_real_equivalent_fractions(learning: pd.DataFrame) -> dict[str, float]:
+    equivalence = real_equivalent_sample_fraction(
+        learning,
+        baseline_method=REAL_BASELINE_METHOD,
+    )
+    fractions = equivalence.groupby("method")["real_equivalent_fraction"].mean().to_dict()
+    if REAL_BASELINE_METHOD in learning["method"].values:
+        fractions[REAL_BASELINE_METHOD] = 1.0
+    return fractions
+
+
+def _learning_curve_label(method: str, equivalent_fractions: dict[str, float]) -> str:
+    fraction = equivalent_fractions.get(method)
+    formatted_fraction = "n/a" if fraction is None or not np.isfinite(fraction) else f"{fraction:.2f}"
+    return f"{method} (real equivalent: {formatted_fraction})"
+
+
+def _roc_auc_std(group: pd.DataFrame):
+    if "roc_auc_std" not in group.columns:
+        return None
+    return group["roc_auc_std"].fillna(0.0)
+
+
+def _root_mean_square(values: pd.Series) -> float:
+    finite = values.dropna().to_numpy(dtype=float)
+    return float(np.sqrt(np.mean(np.square(finite)))) if len(finite) else np.nan
 
 
 def plot_critical_difference_diagram(aulc: pd.DataFrame, *, segment: str = "full", imbalance_ratio: float | None = None):
