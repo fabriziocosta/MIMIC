@@ -336,6 +336,7 @@ def plot_feature_embedding_grid(
     df: pd.DataFrame,
     columns: list[str] | None = None,
     *,
+    display_names: dict[str, str] | None = None,
     n_cols: int = 4,
     random_state=None,
     point_size: int = 12,
@@ -435,7 +436,8 @@ def plot_feature_embedding_grid(
                     labelspacing=0.12,
                     borderaxespad=0.0,
                 )
-        ax.set_title(column, fontsize="medium")
+        title = column if display_names is None else display_names.get(column, column)
+        ax.set_title(title, fontsize="medium")
         ax.set_xticks([])
         ax.set_yticks([])
         ax.set_box_aspect(1)
@@ -452,6 +454,7 @@ def plot_global_embedding_color_grid(
     df: pd.DataFrame,
     columns: list[str] | None = None,
     *,
+    display_names: dict[str, str] | None = None,
     n_cols: int = 4,
     random_state=None,
     point_size: int = 12,
@@ -548,7 +551,8 @@ def plot_global_embedding_color_grid(
                     labelspacing=0.12,
                     borderaxespad=0.0,
                 )
-        ax.set_title(column, fontsize="medium")
+        title = column if display_names is None else display_names.get(column, column)
+        ax.set_title(title, fontsize="medium")
         ax.set_xticks([])
         ax.set_yticks([])
         ax.set_box_aspect(1)

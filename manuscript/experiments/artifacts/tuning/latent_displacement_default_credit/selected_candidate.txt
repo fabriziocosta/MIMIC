@@ -1,0 +1,1 @@
+mode=factorised|capacity=0.857496|neighbors=14|lambda=0.268748:1.09237

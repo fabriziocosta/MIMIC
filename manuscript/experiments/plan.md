@@ -155,7 +155,10 @@ manuscript/
     tests/
       test_streamlined_*.py
     notebooks/
-      01_run_or_view_results.ipynb
+      01_run_experiments.ipynb
+      02_view_results.ipynb
+      03_train_latent_displacement_models.ipynb
+      04_view_latent_displacement_embeddings.ipynb
     artifacts/
       raw/
       tables/

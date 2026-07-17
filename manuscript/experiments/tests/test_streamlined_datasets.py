@@ -1,7 +1,7 @@
 import pandas as pd
 
 from streamlined import datasets
-from streamlined.datasets import dataset_registry, feature_roles, load_dataset
+from streamlined.datasets import dataset_registry, feature_display_names, feature_roles, load_dataset
 
 
 def test_dataset_registry_contains_selected_keys():
@@ -46,3 +46,9 @@ def test_default_credit_roles_treat_coded_fields_as_categorical():
     assert "LIMIT_BAL" in roles["numeric"]
     assert "AGE" in roles["numeric"]
     assert {"SEX", "EDUCATION", "MARRIAGE", "PAY_0"}.issubset(set(roles["categorical"]))
+
+
+def test_default_credit_feature_display_names_expand_openml_placeholders():
+    names = feature_display_names("default_credit", ["x1", "x6", "x23"])
+
+    assert names == {"x1": "LIMIT_BAL", "x6": "PAY_0", "x23": "PAY_AMT6"}

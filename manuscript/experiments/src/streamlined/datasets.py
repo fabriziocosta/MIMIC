@@ -59,6 +59,32 @@ DEFAULT_NUMERIC = (
     "PAY_AMT6",
 )
 
+DEFAULT_CREDIT_OPENML_NAMES = {
+    "x1": "LIMIT_BAL",
+    "x2": "SEX",
+    "x3": "EDUCATION",
+    "x4": "MARRIAGE",
+    "x5": "AGE",
+    "x6": "PAY_0",
+    "x7": "PAY_2",
+    "x8": "PAY_3",
+    "x9": "PAY_4",
+    "x10": "PAY_5",
+    "x11": "PAY_6",
+    "x12": "BILL_AMT1",
+    "x13": "BILL_AMT2",
+    "x14": "BILL_AMT3",
+    "x15": "BILL_AMT4",
+    "x16": "BILL_AMT5",
+    "x17": "BILL_AMT6",
+    "x18": "PAY_AMT1",
+    "x19": "PAY_AMT2",
+    "x20": "PAY_AMT3",
+    "x21": "PAY_AMT4",
+    "x22": "PAY_AMT5",
+    "x23": "PAY_AMT6",
+}
+
 
 DATASETS = {
     "adult": DatasetSpec(
@@ -146,6 +172,16 @@ def feature_roles(frame: pd.DataFrame, key: str) -> dict[str, list[str]]:
         else:
             categorical.append(column)
     return {"ignore": ignore, "numeric": numeric, "categorical": categorical}
+
+
+def feature_display_names(key: str, columns: list[str]) -> dict[str, str]:
+    """Return human-readable labels without changing model-facing column names."""
+    if key != "default_credit":
+        return {column: column for column in columns}
+    return {
+        column: DEFAULT_CREDIT_OPENML_NAMES.get(str(column).lower(), column)
+        for column in columns
+    }
 
 
 def dataset_metadata(frame: pd.DataFrame, key: str, *, preprocessed_dim: int | None = None, baseline_roc_auc: float | None = None) -> dict:

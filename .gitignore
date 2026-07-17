@@ -17,5 +17,13 @@ env/
 .ipynb_checkpoints/
 notebooks/.ipynb_checkpoints/
 manuscript/artifacts/
+manuscript/experiments/artifacts/models/
+# Experiment outputs reconstructed from raw data and source notebooks.
+manuscript/experiments/artifacts/**/figures/
+manuscript/experiments/artifacts/**/tables/
+manuscript/experiments/artifacts/**/reports/
+manuscript/experiments/artifacts/**/report/
+manuscript/experiments/artifacts/**/models/
+manuscript/experiments/artifacts/**/*.joblib
 data/
 *.log

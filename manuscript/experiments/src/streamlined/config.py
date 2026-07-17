@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace as dataclass_replace
 from pathlib import Path
 import ast
+import re
 
 
 METHOD_KEYS = (
@@ -25,7 +26,10 @@ ARTIFACT_FILENAMES = {
     "regime": Path("tables") / "regime_summary.csv",
     "rank": Path("tables") / "rank_summary.csv",
     "conclusions": Path("reports") / "prescriptive_conclusions.md",
+    "embedding_models": Path("models") / "latent_displacement",
 }
+
+_EXPERIMENT_NAME_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 
 
 @dataclass(frozen=True)
@@ -97,6 +101,57 @@ def artifact_paths(config: ExperimentConfig) -> dict[str, Path]:
     paths = {key: config.artifact_root / rel for key, rel in ARTIFACT_FILENAMES.items()}
     paths["figures"] = config.artifact_root / "figures"
     return paths
+
+
+def experiment_artifact_dir(
+    artifact_base_dir: str | Path,
+    experiment_name: str,
+) -> Path:
+    """Return an isolated artifact directory for a safely named experiment."""
+    name = experiment_name.strip()
+    if not _EXPERIMENT_NAME_PATTERN.fullmatch(name) or name in {".", ".."}:
+        raise ValueError(
+            "experiment_name must start with a letter or number and contain only "
+            "letters, numbers, dots, underscores, or hyphens"
+        )
+    return Path(artifact_base_dir) / name
+
+
+def resolve_experiment_artifact_dir(
+    artifact_base_dir: str | Path,
+    experiment_name: str | None,
+) -> Path:
+    """Resolve a named experiment, or the most recently updated completed run."""
+    if experiment_name is not None:
+        return experiment_artifact_dir(artifact_base_dir, experiment_name)
+
+    base_dir = Path(artifact_base_dir)
+    result_files = [
+        path
+        for path in base_dir.glob("*/raw/condition_results.csv")
+        if path.is_file()
+    ]
+    if not result_files:
+        raise FileNotFoundError(
+            f"No experiment results found under artifact directory: {base_dir}"
+        )
+    latest_results = max(result_files, key=lambda path: path.stat().st_mtime_ns)
+    return latest_results.parent.parent
+
+
+def with_dataset_n_rows(
+    config: ExperimentConfig,
+    n_rows: int,
+) -> ExperimentConfig:
+    """Apply one explicit dataset row limit to every dataset in a profile."""
+    selected_n_rows = int(n_rows)
+    if selected_n_rows < 1:
+        raise ValueError("n_rows must be at least 1")
+    profile = dataclass_replace(
+        config.profile,
+        dataset_n_rows={key: selected_n_rows for key in config.profile.datasets},
+    )
+    return dataclass_replace(config, profile=profile)
 
 
 def ensure_artifact_dirs(config: ExperimentConfig) -> None:
