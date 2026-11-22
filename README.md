@@ -1,6 +1,6 @@
 # MIMIC
 
-[![Read the Docs](https://app.readthedocs.org/projects/mimic-framework/badge/?version=latest)](https://mimic-framework.readthedocs.io/en/latest/)
+[![Read the Docs](https://img.shields.io/readthedocs/mimic-framework/latest)](https://mimic-framework.readthedocs.io/en/latest/)
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.24445491.svg)](https://doi.org/10.5281/zenodo.24445490)
 
 MIMIC stands for **Modular Inference for Missingness, Inconsistency, and
