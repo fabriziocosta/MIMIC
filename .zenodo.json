@@ -1,0 +1,17 @@
+{
+  "upload_type": "software",
+  "title": "MIMIC: Modular Inference for Missingness, Inconsistency, and Creation",
+  "creators": [
+    {
+      "name": "Fabrizio Costa"
+    }
+  ],
+  "description": "MIMIC is a modular framework for working with mixed tabular data. It treats imputation, consistency checking, supervised prediction, uncertainty estimation, and synthetic data generation as variations of predicting one feature from the rest of a row.",
+  "keywords": [
+    "missing data",
+    "imputation",
+    "synthetic data",
+    "tabular data",
+    "machine learning"
+  ]
+}
