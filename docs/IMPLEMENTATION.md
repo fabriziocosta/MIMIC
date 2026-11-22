@@ -121,6 +121,10 @@ The modes map to generation behavior and also accept numeric aliases:
 * `mode="factorised"` or `mode=2`: `ResNetEncoder` with `NeuralConditionalSampler`, factorised probabilistic decoding;
 * `mode="joint"` or `mode=3`: `ResNetEncoder` with `NeuralConditionalSampler`, deterministic joint decoding.
 
+See the [mathematical mode reference](MODES.md) for the equations defining
+each preset, including the training objectives, conditional evidence, and
+generation-time decoding rules.
+
 Explicit `encoder`, `decoder`, `policy`, `n_bootstrap`, `bootstrap`, or
 `generation_decode_mode` arguments override the corresponding preset behaviour.
 If a custom decoder is supplied and `generation_decode_mode="auto"`, decode-mode
