@@ -24,7 +24,7 @@ preprocessed context with target column $j$ excluded:<br>
 $u_{ij}=\phi_{-j}(x_i,m_i),\qquad h_{ij}=E_j(u_{ij})\in\mathbb R^{d_j}.$
 
 The representation of a row is the concatenation of its feature blocks:<br>
-$H_i=[h_{i1}\,\|\,h_{i2}\,\|\,\cdots\,\|\,h_{ip}] \in\mathbb R^{D},\qquad D=\sum_j d_j.$
+$H_i=[h_{i1}\,\,\Vert\,\,h_{i2}\,\,\Vert\,\,\cdots\,\,\Vert\,\,h_{ip}] \in\mathbb R^{D},\qquad D=\sum_j d_j.$
 
 Each encoder is trained as a feature prediction task on rows where its target
 is observed. The learned representation is then used to fit a target-specific
@@ -54,7 +54,7 @@ in [`_preset_components`](https://github.com/fabriziocosta/MIMIC/blob/master/src
 For each modelled column $j$, the identity encoder receives the full
 preprocessed row, including column $j$, and returns it unchanged. With one
 feature block per modelled column, the concatenated representation is<br>
-$h_{ij}=\phi(x_i,m_i)\quad\text{for every }j,\qquad H_i=[\phi(x_i,m_i)\|\cdots\|\phi(x_i,m_i)] \quad(p\text{ identical blocks}).$
+$h_{ij}=\phi(x_i,m_i)\quad\text{for every }j,\qquad H_i=[\phi(x_i,m_i)\,\Vert\,\cdots\,\Vert\,\phi(x_i,m_i)] \quad(p\text{ identical blocks}).$
 
 The identity decoder selects the coordinates for its target (for categorical
 targets, the corresponding one-hot scores) and maps them back through the
@@ -72,7 +72,7 @@ feature-space baseline; it is not a conditional probability model.
 
 ## Direct preset
 
-For each generated embedding $H^*=[h^*_1\|\cdots\|h^*_p]$, direct
+For each generated embedding $H^*=[h^*_1\,\Vert\,\cdots\,\Vert\,h^*_p]$, direct
 decoding applies each target-specific decoder to that target's own feature
 block:<br>
 $\hat x^*_j=D_j(h^*_j),\qquad j\in\mathcal J.$
@@ -97,7 +97,7 @@ target-specific block; it does not mean that the encoder was given $x_j$.
 Factorised generation first makes the same deterministic initial decode as the
 direct preset. It then performs three ordered passes over the modelled columns.
 For each unconditioned column $j$, it forms the fixed context<br>
-$H^*_{-j}=[h^*_1\|\cdots\|h^*_{j-1}\|h^*_{j+1}\|\cdots\|h^*_p]$
+$H^*_{-j}=[h^*_1\,\Vert\,\cdots\,\Vert\,h^*_{j-1}\,\Vert\,h^*_{j+1}\,\Vert\,\cdots\,\Vert\,h^*_p]$
 
 and samples<br>
 $x^{(r)}_j\sim q_j(\,\cdot\mid H^*_{-j}),\qquad r=1,2,3.$
@@ -130,7 +130,7 @@ For a categorical target, $e_j$ is its vector of predicted class
 probabilities. For a numerical target, $e_j$ concatenates the predicted
 mixture weights, component means, and component scales. The complete evidence
 vector is<br>
-$e^*=[e_1\|e_2\|\cdots\|e_p].$
+$e^*=[e_1\,\Vert\,e_2\,\Vert\,\cdots\,\Vert\,e_p].$
 
 A shared neural trunk $g_\omega$ maps $e^*$ to a shared hidden state, and
 target-specific heads $r_{\omega,j}$ produce all column predictions:<br>
@@ -155,7 +155,7 @@ the average of separate per-target losses.
 
 | Preset | Representation used for generation | Decode rule | Stochastic output sampling |
 | --- | --- | --- | --- |
-| `identity` | Repeated preprocessed row blocks $H=[\phi(x,m)\|\cdots\|\phi(x,m)]$ | Identity coordinate decoding | No |
+| `identity` | Repeated preprocessed row blocks $H=[\phi(x,m)\,\Vert\,\cdots\,\Vert\,\phi(x,m)]$ | Identity coordinate decoding | No |
 | `direct` | Concatenated target-excluded neural blocks $H$ | $D_j(h_j)$, one head per target | No |
 | `factorised` | Same neural blocks $H$ | Initial direct decode, then $q_j(x_j\mid H_{-j})$ for three passes | Yes |
 | `joint` | Same neural blocks $H$ | Shared decoder $G([c_j(H_{-j})]_j)$ | No |
