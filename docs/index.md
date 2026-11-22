@@ -17,12 +17,13 @@ synthetic data generation.
   layout, tests, notebooks, and release process.
 - **Understand the API:** [Implementation](IMPLEMENTATION.md) describes the
   estimator and its components.
+- **Understand the mode presets mathematically:**
+  [Mathematical mode reference](MODES.md) defines the identity, direct,
+  factorised, and joint presets.
 - **Read the research context:** [White paper](WHITEPAPER.md) explains the
   motivation and design.
 - **Explore image workflows:** [MIMIC for Images](IMAGE_WORKFLOWS.md) describes
   applying MIMIC to image data and links to its notebooks.
-- **Release a version:** [Versioning](VERSIONING.md) covers version numbers,
-  changelog entries, and tags.
 
 ## Quick example
 
