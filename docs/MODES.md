@@ -88,7 +88,7 @@ feature-space baseline; it is not a conditional probability model.
 
 ## Direct preset
 
-For each generated embedding (H^*=[h^*_1\|\cdots\|h^*_p]), direct
+For each generated embedding \\(H^*=[h^*_1\\|\\cdots\\|h^*_p]\\), direct
 decoding applies each target-specific decoder to that target's own feature
 block:
 \[
@@ -194,7 +194,7 @@ the average of separate per-target losses.
 | `identity` | Preprocessed row \(\phi(x,m)\) | Identity coordinate decoding | No |
 | `direct` | Concatenated target-excluded neural blocks \(H\) | \(D_j(h_j)\), one head per target | No |
 | `factorised` | Same neural blocks \(H\) | Initial direct decode, then \(q_j(x_j\mid H_{-j})\) for three passes | Yes |
-| `joint` | Same neural blocks (H) | Shared decoder \(G([c_j(H_{-j})]_j)\) | No |
+| `joint` | Same neural blocks \\(H\\) | Shared decoder \(G([c_j(H_{-j})]_j)\) | No |
 
 The latent generation policy (for example, interpolation or displacement) is a
 separate choice from the decoding preset. For the default displacement policy,
