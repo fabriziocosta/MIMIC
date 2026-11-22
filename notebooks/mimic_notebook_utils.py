@@ -110,7 +110,17 @@ def plot_oversampling(df: pd.DataFrame, generated: pd.DataFrame, title: str = "D
                 color, alpha, size = ORIGINAL_MINORITY_COLOR, 0.9, 46
             else:
                 color, alpha, size = GENERATED_COLOR, 0.9, 52
-            ax.scatter(part["x"], part["y"], label=f"{source} {label}", color=color, marker="o", alpha=alpha, s=size)
+            ax.scatter(
+                part["x"],
+                part["y"],
+                label=f"{source} {label}",
+                color=color,
+                marker="o",
+                alpha=alpha,
+                s=size,
+                edgecolors="#808080",
+                linewidths=0.25,
+            )
         ax.set_title(panel_title)
         ax.set_xlabel("x")
         ax.set_aspect("equal", adjustable="box")
@@ -160,9 +170,21 @@ def identity_generation_plot(
     base = df.drop(columns=["id"], errors="ignore")
     majority = base[base["label"] == "majority"]
     minority = base[base["label"] == "minority"]
-    ax.scatter(majority["x"], majority["y"], label="original majority", color=ORIGINAL_MAJORITY_COLOR, alpha=0.32, s=24)
-    ax.scatter(minority["x"], minority["y"], label="original minority", color=ORIGINAL_MINORITY_COLOR, alpha=0.82, s=36)
-    ax.scatter(samples["x"], samples["y"], label="generated minority", color=GENERATED_COLOR, marker="o", alpha=0.9, s=52)
+    ax.scatter(
+        majority["x"], majority["y"], label="original majority",
+        color=ORIGINAL_MAJORITY_COLOR, alpha=0.32, s=24,
+        edgecolors="#808080", linewidths=0.25,
+    )
+    ax.scatter(
+        minority["x"], minority["y"], label="original minority",
+        color=ORIGINAL_MINORITY_COLOR, alpha=0.82, s=36,
+        edgecolors="#808080", linewidths=0.25,
+    )
+    ax.scatter(
+        samples["x"], samples["y"], label="generated minority",
+        color=GENERATED_COLOR, marker="o", alpha=0.9, s=52,
+        edgecolors="#808080", linewidths=0.25,
+    )
     ax.set_title(title)
     ax.set_xlabel("x")
     ax.set_ylabel("y")
@@ -343,8 +365,21 @@ def plot_feature_embedding_grid(
     alpha: float = 0.75,
     max_legend_labels: int = 6,
     size: tuple[float, float] = (5, 5),
+    method: str = "imste",
+    n_msts: int = 32,
+    gravity_strength: float = 0.1,
+    mean_shift_iterations: int = 0,
 ):
-    """Plot one 2D projection per feature embedding, coloured by that feature's raw value."""
+    """Plot one 2D projection per feature embedding, coloured by its raw value.
+
+    IMSTE is used by default with 32 spanning-tree iterations, gravity strength
+    0.1, and no mean-shift iterations. Pass ``method="mds"`` for classical
+    MDS; the IMSTE settings can be adjusted with their corresponding arguments.
+    """
+
+    method = str(method).lower()
+    if method not in {"imste", "mds"}:
+        raise ValueError("method must be 'imste' or 'mds'")
 
     columns = list(model.model_columns_ if columns is None else columns)
     if not columns:
@@ -366,17 +401,29 @@ def plot_feature_embedding_grid(
         if column not in model.embedding_slices_:
             raise ValueError(f"Unknown embedding column {column!r}")
         sl = model.embedding_slices_[column]
-        coords = classical_mds_2d(H[:, sl], random_state=random_state)
+        feature_embedding = H[:, sl]
+        if method == "imste":
+            seed = 42 if random_state is None else random_state
+            coords = IteratedMinimumSpanningTreeEmbedder(
+                n_components=2,
+                n_msts=n_msts,
+                gravity_strength=gravity_strength,
+                mean_shift_iterations=mean_shift_iterations,
+                random_state=seed,
+            ).fit_transform(feature_embedding)
+        else:
+            coords = classical_mds_2d(feature_embedding, random_state=random_state).to_numpy()
         values = df[column]
         if pd.api.types.is_numeric_dtype(values):
             scatter = ax.scatter(
-                coords["mds1"],
-                coords["mds2"],
+                coords[:, 0],
+                coords[:, 1],
                 c=pd.to_numeric(values, errors="coerce"),
                 s=point_size,
                 alpha=alpha,
                 cmap="viridis",
-                edgecolor="none",
+                edgecolors="#808080",
+                linewidths=0.25,
             )
             fig.colorbar(scatter, ax=ax, fraction=0.046, pad=0.02)
         else:
@@ -384,15 +431,16 @@ def plot_feature_embedding_grid(
             codes, uniques = pd.factorize(labels)
             cmap = plt.get_cmap("tab20", max(1, len(uniques)))
             ax.scatter(
-                coords["mds1"],
-                coords["mds2"],
+                coords[:, 0],
+                coords[:, 1],
                 c=codes,
                 s=point_size,
                 alpha=alpha,
                 cmap=cmap,
                 vmin=-0.5,
                 vmax=max(0.5, len(uniques) - 0.5),
-                edgecolor="none",
+                edgecolors="#808080",
+                linewidths=0.25,
             )
             legend_limit = max(0, int(max_legend_labels))
             legend_labels = labels.value_counts().head(legend_limit).index
@@ -514,7 +562,8 @@ def plot_global_embedding_color_grid(
                 s=point_size,
                 alpha=alpha,
                 cmap="viridis",
-                edgecolor="none",
+                edgecolors="#808080",
+                linewidths=0.25,
             )
             fig.colorbar(scatter, ax=ax, fraction=0.046, pad=0.02)
         else:
@@ -530,7 +579,8 @@ def plot_global_embedding_color_grid(
                 cmap=cmap,
                 vmin=-0.5,
                 vmax=max(0.5, len(uniques) - 0.5),
-                edgecolor="none",
+                edgecolors="#808080",
+                linewidths=0.25,
             )
             legend_limit = max(0, int(max_legend_labels))
             legend_labels = labels.value_counts().head(legend_limit).index
@@ -709,7 +759,8 @@ def plot_pareto_feature_pairs(
             cmap="viridis" if target_is_numeric else "tab10",
             s=16,
             alpha=0.72,
-            edgecolor="none",
+            edgecolors="#808080",
+            linewidths=0.25,
         )
         axis_name = "IMSTE" if method == "imste" else "MDS"
         ax.set_xlabel(f"pair embedding {axis_name} 1")

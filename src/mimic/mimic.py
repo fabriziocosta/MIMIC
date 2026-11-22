@@ -1097,13 +1097,24 @@ class MIMIC(BaseEstimator, TransformerMixin):
             [f"Original data {method_name}", f"MIMIC embedding {method_name}"],
         ):
             if colors is None:
-                axis.scatter(xy[:, 0], xy[:, 1], s=24)
+                axis.scatter(
+                    xy[:, 0], xy[:, 1], s=24,
+                    edgecolors="#808080", linewidths=0.25,
+                )
             elif is_numeric:
-                sc = axis.scatter(xy[:, 0], xy[:, 1], c=colors, s=24, cmap="viridis")
+                sc = axis.scatter(
+                    xy[:, 0], xy[:, 1], c=colors, s=24,
+                    cmap="viridis",
+                    edgecolors="#808080", linewidths=0.25,
+                )
                 fig.colorbar(sc, ax=axis)
             else:
                 codes, uniques = pd.factorize(colors.fillna("__missing__"))
-                sc = axis.scatter(xy[:, 0], xy[:, 1], c=codes, s=24, cmap="tab10")
+                sc = axis.scatter(
+                    xy[:, 0], xy[:, 1], c=codes, s=24,
+                    cmap="tab10",
+                    edgecolors="#808080", linewidths=0.25,
+                )
                 axis.legend(
                     handles=sc.legend_elements()[0],
                     labels=[str(u) for u in uniques],
