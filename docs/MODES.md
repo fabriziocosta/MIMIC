@@ -15,8 +15,8 @@ except that `identity` uses the preprocessed row itself as its representation.
 Let the modelled data have \(p\) columns, indexed by \(j\in\mathcal J
 =\{1,\ldots,p\}\). Column \(j\) has task type \(t_j\), either regression
 or classification. Let \(x_i=(x_{i1},\ldots,x_{ip})\) denote row \(i\), and
-let \(\phi(x_i,m_i)\) be the globally preprocessed row, including encoded
-values and missingness indicators. Here \(m_i\) records which values are
+let \\(\phi(x_i,m_i)\) be the globally preprocessed row, including encoded
+values and missingness indicators. Here \\(m_i\) records which values are
 missing. Columns declared as ignored are outside \(\mathcal J\).
 
 For the neural presets, the default encoder for target \(j\) receives the
@@ -88,7 +88,7 @@ feature-space baseline; it is not a conditional probability model.
 
 ## Direct preset
 
-For each generated embedding \\(H^*=[h^*_1\\|\\cdots\\|h^*_p]\\), direct
+For each generated embedding \(H^*=[h^*_1\\|\\cdots\\|h^*_p]\), direct
 decoding applies each target-specific decoder to that target's own feature
 block:
 \[
@@ -194,7 +194,7 @@ the average of separate per-target losses.
 | `identity` | Preprocessed row \(\phi(x,m)\) | Identity coordinate decoding | No |
 | `direct` | Concatenated target-excluded neural blocks \(H\) | \(D_j(h_j)\), one head per target | No |
 | `factorised` | Same neural blocks \(H\) | Initial direct decode, then \(q_j(x_j\mid H_{-j})\) for three passes | Yes |
-| `joint` | Same neural blocks \\(H\\) | Shared decoder \(G([c_j(H_{-j})]_j)\) | No |
+| `joint` | Same neural blocks \(H\) | Shared decoder \(G([c_j(H_{-j})]_j)\) | No |
 
 The latent generation policy (for example, interpolation or displacement) is a
 separate choice from the decoding preset. For the default displacement policy,
