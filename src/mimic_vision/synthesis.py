@@ -1,4 +1,4 @@
-"""Helpers for synthesizing images from MIMIC vision embeddings."""
+"""Helpers for synthesizing images from MIMIC for Images embeddings."""
 
 from __future__ import annotations
 

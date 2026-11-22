@@ -1,4 +1,4 @@
-"""Dataset loading helpers for MIMIC vision experiments."""
+"""Dataset loading helpers for MIMIC for Images experiments."""
 
 from __future__ import annotations
 

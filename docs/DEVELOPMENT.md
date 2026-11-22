@@ -29,7 +29,11 @@ reinstalling the package.
 | `tests/` | Main package regression and behaviour tests |
 | `manuscript/experiments/` | Reproducible manuscript analysis package and its tests |
 | `notebooks/` | Tutorials, demos, and dataset workflows |
+| `vision/notebooks/` | Image dataset, embedding, visualization, and synthesis workflows |
 | `docs/` | Onboarding and project design documentation |
+
+The [MIMIC for Images guide](VISION.md) explains the image workflow and its
+relationship to the shared vision helpers.
 
 The main estimator is `MIMIC` in `src/mimic/mimic.py`. `fit` builds the
 feature-wise modules and embedding state; `transform`, `impute`, `confidence`,

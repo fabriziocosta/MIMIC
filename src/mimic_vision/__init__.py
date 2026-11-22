@@ -1,4 +1,4 @@
-"""Utilities for MIMIC vision experiments."""
+"""Utilities for MIMIC for Images experiments."""
 
 from .datasets import (
     VisionDataset,
