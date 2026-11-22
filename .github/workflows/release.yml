@@ -1,0 +1,74 @@
+name: GitHub Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out tagged source
+        uses: actions/checkout@v7.0.1
+
+      - name: Validate version and extract changelog notes
+        id: release-notes
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          python - <<'PY'
+          import ast
+          import os
+          import re
+          from pathlib import Path
+
+          version_tree = ast.parse(Path("src/mimic/_version.py").read_text())
+          version = next(
+              ast.literal_eval(node.value)
+              for node in version_tree.body
+              if isinstance(node, ast.Assign)
+              and any(isinstance(target, ast.Name) and target.id == "__version__" for target in node.targets)
+          )
+          tag = os.environ["RELEASE_TAG"]
+          if tag != f"v{version}":
+              raise SystemExit(f"Tag {tag!r} does not match package version {version!r}")
+
+          changelog = Path("CHANGELOG.md").read_text()
+          heading = re.compile(rf"^## \[{re.escape(version)}\] - \d{{4}}-\d{{2}}$", re.MULTILINE)
+          match = heading.search(changelog)
+          if match is None:
+              raise SystemExit(f"CHANGELOG.md has no dated section for version {version}")
+          next_heading = re.search(r"^## ", changelog[match.end():], re.MULTILINE)
+          end = match.end() + next_heading.start() if next_heading else len(changelog)
+          notes = changelog[match.end():end].strip()
+          if not notes:
+              raise SystemExit(f"CHANGELOG.md section for version {version} is empty")
+
+          notes_path = Path(os.environ["RUNNER_TEMP"]) / "release-notes.md"
+          notes_path.write_text(notes + "\n")
+          with open(os.environ["GITHUB_OUTPUT"], "a") as output:
+              output.write(f"version={version}\n")
+              output.write(f"notes_path={notes_path}\n")
+          PY
+
+      - name: Create or update GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+          RELEASE_VERSION: ${{ steps.release-notes.outputs.version }}
+          RELEASE_NOTES: ${{ steps.release-notes.outputs.notes_path }}
+        run: |
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release edit "$RELEASE_TAG" \
+              --title "MIMIC $RELEASE_VERSION" \
+              --notes-file "$RELEASE_NOTES"
+          else
+            gh release create "$RELEASE_TAG" \
+              --verify-tag \
+              --title "MIMIC $RELEASE_VERSION" \
+              --notes-file "$RELEASE_NOTES"
+          fi

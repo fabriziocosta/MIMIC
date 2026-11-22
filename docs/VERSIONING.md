@@ -15,8 +15,18 @@ artifacts, and the command-line `--version` output all read from that value.
      prominently in the changelog.
 3. Move the released notes from `Unreleased` into a section named for the new
    version, then start a fresh `Unreleased` section.
-4. Tag the release commit `v<version>` (for example, `v0.2.0`).
-5. Build and publish the package from that tagged commit.
+4. Tag the release commit `v<version>` and push the tag:
+
+   ```bash
+   git tag -a v0.2.0 -m "MIMIC 0.2.0"
+   git push origin v0.2.0
+   ```
+
+5. The GitHub Actions release workflow verifies that the tag matches
+   `__version__` and that the corresponding changelog section exists, then
+   creates or updates the GitHub Release from those notes.
+6. Build and publish the Python package from that tagged commit when a package
+   release is intended.
 
 Do not edit the version separately in `pyproject.toml`; it is derived from the
 canonical Python version module.
