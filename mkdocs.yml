@@ -1,0 +1,18 @@
+site_name: MIMIC
+site_description: Modular inference for missingness, inconsistency, and creation
+repo_url: https://github.com/fabriziocosta/MIMIC
+edit_uri: edit/master/docs/
+
+docs_dir: docs
+theme:
+  name: readthedocs
+
+nav:
+  - Home: index.md
+  - Getting started: GETTING_STARTED.md
+  - Development: DEVELOPMENT.md
+  - Implementation: IMPLEMENTATION.md
+  - Research white paper: WHITEPAPER.md
+  - Versioning: VERSIONING.md
+
+strict: true

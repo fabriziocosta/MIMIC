@@ -145,9 +145,9 @@ Parquet and Excel support may require installing a pandas I/O engine such as
 
 ## Continue learning
 
-- [Notebook 01: basic usage](../notebooks/01_basic_usage.ipynb)
-- [Notebook 02: classification and regression](../notebooks/02_classification_and_regression.ipynb)
-- [Notebook 03: generation and traceability](../notebooks/03_generation_oversampling_traceability.ipynb)
-- [Notebook 04: operating modes and shared ResNet](../notebooks/04_dataset_operating_modes_resnet.ipynb)
-- [Notebook 05: dataset sampling](../notebooks/05_simplified_dataset_sampling.ipynb)
+- [Notebook 01: basic usage](https://github.com/fabriziocosta/MIMIC/blob/master/notebooks/01_basic_usage.ipynb)
+- [Notebook 02: classification and regression](https://github.com/fabriziocosta/MIMIC/blob/master/notebooks/02_classification_and_regression.ipynb)
+- [Notebook 03: generation and traceability](https://github.com/fabriziocosta/MIMIC/blob/master/notebooks/03_generation_oversampling_traceability.ipynb)
+- [Notebook 04: operating modes and shared ResNet](https://github.com/fabriziocosta/MIMIC/blob/master/notebooks/04_dataset_operating_modes_resnet.ipynb)
+- [Notebook 05: dataset sampling](https://github.com/fabriziocosta/MIMIC/blob/master/notebooks/05_simplified_dataset_sampling.ipynb)
 - [White paper](WHITEPAPER.md) for the research motivation and [implementation notes](IMPLEMENTATION.md) for the API and internal design.
