@@ -10,6 +10,8 @@ from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
 from sklearn.linear_model import LinearRegression, LogisticRegression
 from sklearn.utils.validation import check_is_fitted
 
+from ._torch_utils import preserve_torch_rng
+
 try:
     import torch
     from torch import nn
@@ -590,6 +592,7 @@ class NeuralConditionalSampler(MixedFeatureDecoder):
             return self._predict_class_proba(model, H_context)
         raise ValueError("task must be 'regression' or 'classification'")
 
+    @preserve_torch_rng
     def fit_joint_decoder(self, evidence, targets, target_specs):
         self._require_torch()
         X_arr = self._as_float32_array(evidence)
@@ -691,6 +694,7 @@ class NeuralConditionalSampler(MixedFeatureDecoder):
                 predictions[column] = np.argmax(out, axis=1).astype(int)
         return predictions
 
+    @preserve_torch_rng
     def _fit_neural_model(self, task: str, X, y):
         X_arr = self._as_float32_array(X)
         if task == "classification":

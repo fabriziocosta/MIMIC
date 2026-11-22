@@ -6,6 +6,7 @@ import argparse
 import json
 from pathlib import Path
 
+from ._version import __version__
 from .mimic import mimic_data
 
 
@@ -53,6 +54,7 @@ def _build_parser() -> argparse.ArgumentParser:
             "the same number of rows. CSV, Parquet, and Excel files are supported."
         ),
     )
+    parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     parser.add_argument("filename", help="Input .csv, .parquet, .xls, or .xlsx file.")
     parser.add_argument(
         "-o",

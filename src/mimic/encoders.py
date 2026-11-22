@@ -15,6 +15,8 @@ from sklearn.preprocessing import OneHotEncoder
 from sklearn.utils.validation import check_is_fitted
 from tqdm.auto import tqdm
 
+from ._torch_utils import preserve_torch_rng
+
 
 @dataclass
 class SharedFeatureGroup:
@@ -305,6 +307,7 @@ class ResNetEncoder(BaseEstimator, TransformerMixin):
         self.random_state = random_state
         self.device = device
 
+    @preserve_torch_rng
     def fit(self, X, y):
         if torch is None:
             raise ImportError("ResNetEncoder requires torch")
@@ -460,6 +463,7 @@ class SharedResNetEncoder(BaseEstimator):
         self.random_state = random_state
         self.device = device
 
+    @preserve_torch_rng
     def fit(
         self,
         X,

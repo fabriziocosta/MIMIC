@@ -1,5 +1,6 @@
 """MIMIC public API."""
 
+from ._version import __version__
 from .decoders import ForestConditionalSampler, IdentityDecoder, LinearMixedFeatureDecoder, MixedFeatureDecoder, NeuralConditionalSampler
 from .datasets import load_paper_dataset, paper_dataset_columns, paper_dataset_names, paper_dataset_registry
 from .encoders import IdentityEncoder, RandomForestPathEncoder, ResNetEncoder, SharedFeatureGroup, SharedResNetEncoder
@@ -8,6 +9,7 @@ from .mimic import MIMIC, NearestNeighborPrivacyFilter, mimic_data, sample, samp
 from .policies import GenerationPolicy
 
 __all__ = [
+    "__version__",
     "GenerationPolicy",
     "ForestConditionalSampler",
     "IdentityDecoder",

@@ -5,8 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field, fields, is_dataclass
 from copy import deepcopy
 from datetime import datetime, timezone
-from importlib.metadata import PackageNotFoundError, version
 import json
+import operator
 from pathlib import Path
 import sys
 import warnings
@@ -26,6 +26,7 @@ from sklearn.utils.validation import check_is_fitted
 from tqdm.auto import tqdm
 
 from .decoders import IdentityDecoder, MixedFeatureDecoder, NeuralConditionalSampler
+from ._version import __version__
 from .encoders import (
     IdentityEncoder,
     RandomForestPathEncoder,
@@ -751,6 +752,24 @@ class MIMIC(BaseEstimator, TransformerMixin):
 
     def sample(self, n_samples: int, condition=None, return_trace: bool = False, privacy_filter=None):
         check_is_fitted(self, "train_embeddings_")
+        if isinstance(n_samples, (bool, np.bool_)):
+            raise ValueError("n_samples must be a non-negative integer")
+        try:
+            n_samples = operator.index(n_samples)
+        except TypeError as exc:
+            raise ValueError("n_samples must be a non-negative integer") from exc
+        if n_samples < 0:
+            raise ValueError("n_samples must be a non-negative integer")
+        if n_samples == 0:
+            empty = pd.DataFrame(
+                {
+                    column: pd.Series(dtype=self.input_dtypes_.get(column, object))
+                    for column in self.model_columns_
+                }
+            )
+            if return_trace:
+                return empty, pd.DataFrame()
+            return empty
         rng = np.random.default_rng(self.random_state)
         H = np.asarray(self.train_embeddings_)
         condition_mask = self._condition_mask(condition)
@@ -816,13 +835,9 @@ class MIMIC(BaseEstimator, TransformerMixin):
         return model
 
     def _persistence_metadata(self):
-        try:
-            package_version = version("mimic")
-        except PackageNotFoundError:
-            package_version = None
         return {
             "package": "mimic",
-            "package_version": package_version,
+            "package_version": __version__,
             "python_version": sys.version.split()[0],
             "saved_at": datetime.now(timezone.utc).isoformat(),
             "model_columns": list(getattr(self, "model_columns_", [])),
@@ -1004,9 +1019,11 @@ class MIMIC(BaseEstimator, TransformerMixin):
         }
 
     def _privacy_neighbour_distances(self, H_query, k: int):
-        model = NearestNeighbors(n_neighbors=k)
-        model.fit(np.asarray(self.train_embeddings_))
-        return model.kneighbors(H_query, return_distance=True)
+        return self.neighbour_index_.kneighbors(
+            H_query,
+            n_neighbors=k,
+            return_distance=True,
+        )
 
     def plot(self, X=None, embedding_columns=None, color_by=None, center=None, random_state=None, ax=None):
         check_is_fitted(self, "feature_modules_")

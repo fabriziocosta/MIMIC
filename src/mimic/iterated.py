@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from copy import deepcopy
 from datetime import datetime, timezone
-from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 import sys
 
@@ -17,6 +16,7 @@ from sklearn.utils.validation import check_is_fitted
 
 from .encoders import IdentityEncoder
 from .mimic import MIMIC
+from ._version import __version__
 
 
 DEFAULT_BASE_LEVEL = {"mode": "direct", "capacity": 0.2, "bootstrap": False}
@@ -201,13 +201,9 @@ class IteratedMIMIC(BaseEstimator, TransformerMixin):
         return pd.DataFrame(arr, columns=columns)
 
     def _persistence_metadata(self):
-        try:
-            package_version = version("mimic")
-        except PackageNotFoundError:
-            package_version = None
         return {
             "package": "mimic",
-            "package_version": package_version,
+            "package_version": __version__,
             "python_version": sys.version.split()[0],
             "saved_at": datetime.now(timezone.utc).isoformat(),
             "estimator": "IteratedMIMIC",

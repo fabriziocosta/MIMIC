@@ -6,6 +6,18 @@ imputation, consistency checking, supervised prediction, uncertainty estimation,
 and synthetic data generation as variations of the same problem: predicting one
 feature from the rest of the row.
 
+## Start here
+
+- **New to MIMIC?** Follow the [Getting started guide](docs/GETTING_STARTED.md)
+  for installation, a first generation run, and the main estimator methods.
+- **Contributing?** Use the [Development guide](docs/DEVELOPMENT.md) for the
+  environment setup, code map, tests, and release pointers.
+- **Looking for design details?** Read the [white paper](docs/WHITEPAPER.md)
+  or the [implementation notes](docs/IMPLEMENTATION.md).
+
+This README is the project overview and API tour. The onboarding guides provide
+step-by-step paths for using and developing MIMIC.
+
 The project is designed around a scikit-learn-style estimator with replaceable
 encoders, decoders, and generation policies. The current implementation includes
 tree-based, neural, linear, stochastic, and identity-style components so the same
@@ -308,8 +320,10 @@ pip install -e ".[dev]"
 - `src/mimic/`: package source code.
 - `tests/`: regression and behaviour tests.
 - `notebooks/`: worked examples and operating-mode demonstrations.
-- `WHITEPAPER.md`: conceptual overview and motivation.
-- `IMPLEMENTATION.md`: implementation details and API design notes.
+- [`docs/GETTING_STARTED.md`](docs/GETTING_STARTED.md): first-run user guide.
+- [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md): contributor onboarding.
+- [`docs/WHITEPAPER.md`](docs/WHITEPAPER.md): conceptual overview and motivation.
+- [`docs/IMPLEMENTATION.md`](docs/IMPLEMENTATION.md): implementation details and API design notes.
 
 ## Development
 
@@ -321,6 +335,13 @@ pytest
 
 The notebooks provide examples for basic usage, classification and regression,
 generation, oversampling, traceability, and alternative encoder/decoder choices.
+
+## Versioning
+
+The package follows Semantic Versioning while its API is evolving. See
+[`docs/VERSIONING.md`](docs/VERSIONING.md) for the release process and
+[`CHANGELOG.md`](CHANGELOG.md) for release notes. The current version is
+available as `mimic.__version__` and with `mimic-data --version`.
 
 ## Status
 
