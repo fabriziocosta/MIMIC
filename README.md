@@ -27,6 +27,9 @@ feature from the rest of the row.
   environment setup, code map, tests, and release pointers.
 - **Looking for design details?** Read the [white paper](docs/WHITEPAPER.md)
   or the [implementation notes](docs/IMPLEMENTATION.md).
+- **Need the preset equations?** See the
+  [mathematical mode reference](docs/MODES.md) for identity, direct, factorised,
+  and joint decoding.
 - **Working with images?** See [MIMIC for Images](docs/IMAGE_WORKFLOWS.md) and
   the [`image_workflows/` notebooks](image_workflows/notebooks/).
 
@@ -362,6 +365,7 @@ root-level `data/` directory. The built documentation site is generated under
 
 The documentation guides are [Getting started](docs/GETTING_STARTED.md),
 [Development](docs/DEVELOPMENT.md), [Implementation](docs/IMPLEMENTATION.md),
+[Mathematical mode reference](docs/MODES.md),
 [Research white paper](docs/WHITEPAPER.md), [MIMIC for Images](docs/IMAGE_WORKFLOWS.md),
 and [Versioning](docs/VERSIONING.md).
 
