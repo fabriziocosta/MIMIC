@@ -1,6 +1,6 @@
-# MIMIC
+# MIMIC Tabular
 
-[![Read the Docs](https://img.shields.io/readthedocs/mimic-framework/latest)](https://mimic-framework.readthedocs.io/en/latest/)
+[![Read the Docs](https://img.shields.io/readthedocs/mimic-tabular/latest)](https://mimic-tabular.readthedocs.io/en/latest/)
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.24445491.svg)](https://doi.org/10.5281/zenodo.24445490)
 
 MIMIC stands for **Modular Inference for Missingness, Inconsistency, and
@@ -11,7 +11,7 @@ feature from the rest of the row.
 
 ## Start here
 
-- **Documentation:** Read the [MIMIC-FRAMEWORK docs](https://mimic-framework.readthedocs.io/en/latest/).
+- **Documentation:** Read the [MIMIC Tabular docs](https://mimic-tabular.readthedocs.io/en/latest/).
 - **New to MIMIC?** Follow the [Getting started guide](docs/GETTING_STARTED.md)
   for installation, a first generation run, and the main estimator methods.
 - **Contributing?** Use the [Development guide](docs/DEVELOPMENT.md) for the
@@ -309,16 +309,24 @@ rows with `generation_decode_mode`:
 
 ## Installation
 
-Install the package in editable mode from the repository root:
+Install the published package:
 
 ```bash
-pip install -e .
+python -m pip install mimic-tabular
+```
+
+The distribution is named `mimic-tabular`; its Python import package remains
+`mimic`. To work from a source checkout, install it in editable mode from the
+repository root:
+
+```bash
+python -m pip install -e .
 ```
 
 For notebook and test dependencies:
 
 ```bash
-pip install -e ".[dev]"
+python -m pip install -e ".[dev]"
 ```
 
 ## Project Structure

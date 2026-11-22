@@ -1,5 +1,6 @@
-site_name: MIMIC
+site_name: MIMIC Tabular
 site_description: Modular inference for missingness, inconsistency, and creation
+site_url: https://mimic-tabular.readthedocs.io/en/latest/
 repo_url: https://github.com/fabriziocosta/MIMIC
 edit_uri: edit/master/docs/
 
@@ -15,5 +16,6 @@ nav:
   - Research white paper: WHITEPAPER.md
   - MIMIC for Images: IMAGE_WORKFLOWS.md
   - Versioning: VERSIONING.md
+  - PyPI release: PYPI_RELEASE.md
 
 strict: true

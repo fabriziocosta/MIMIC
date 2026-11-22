@@ -28,5 +28,9 @@ artifacts, and the command-line `--version` output all read from that value.
 6. Build and publish the Python package from that tagged commit when a package
    release is intended.
 
+The PyPI distribution is named `mimic-tabular` (the import remains `mimic`).
+See [Preparing a PyPI release](PYPI_RELEASE.md) for distribution checks and the
+manual Trusted Publishing workflow. That workflow does not run on tag pushes.
+
 Do not edit the version separately in `pyproject.toml`; it is derived from the
 canonical Python version module.

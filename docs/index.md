@@ -1,4 +1,4 @@
-# MIMIC
+# MIMIC Tabular
 
 **Modular Inference for Missingness, Inconsistency, and Creation** is a
 scikit-learn-style framework for mixed tabular data. It learns feature-wise

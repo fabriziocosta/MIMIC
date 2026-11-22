@@ -1,7 +1,7 @@
 {
   "upload_type": "software",
-  "title": "MIMIC: Modular Inference for Missingness, Inconsistency, and Creation",
-  "version": "0.1.1",
+  "title": "MIMIC Tabular: Modular Inference for Missingness, Inconsistency, and Creation",
+  "version": "0.1.3",
   "license": "mit",
   "creators": [
     {

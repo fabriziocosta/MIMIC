@@ -1,13 +1,33 @@
 [build-system]
-requires = ["setuptools>=68", "wheel"]
+requires = ["setuptools>=77", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "mimic"
+name = "mimic-tabular"
 dynamic = ["version"]
-description = "Modular inference for missingness, inconsistency, and creation."
+description = "MIMIC Tabular: modular inference for missingness, inconsistency, and creation."
 readme = "README.md"
 requires-python = ">=3.10"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Fabrizio Costa" }]
+keywords = [
+    "tabular data",
+    "missing data",
+    "imputation",
+    "synthetic data",
+    "machine learning",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Scientific/Engineering :: Information Analysis",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
 dependencies = [
     "joblib",
     "numpy",
@@ -21,6 +41,14 @@ dependencies = [
 
 [project.scripts]
 mimic-data = "mimic.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/fabriziocosta/MIMIC"
+Documentation = "https://mimic-tabular.readthedocs.io/en/latest/"
+Repository = "https://github.com/fabriziocosta/MIMIC"
+Issues = "https://github.com/fabriziocosta/MIMIC/issues"
+Changelog = "https://github.com/fabriziocosta/MIMIC/blob/master/CHANGELOG.md"
+PyPI = "https://pypi.org/project/mimic-tabular/"
 
 [project.optional-dependencies]
 dev = [

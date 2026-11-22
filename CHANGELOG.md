@@ -5,6 +5,14 @@ from the section matching the package version and release tag.
 
 ## [Unreleased]
 
+## [0.1.3] - 2026-11-22
+
+### Changed
+
+- Prepare the `mimic-tabular` PyPI distribution while keeping the Python import name `mimic`.
+- Add package metadata and a manually dispatched Trusted Publishing workflow.
+- Rename the documentation branding and canonical Read the Docs URL to MIMIC Tabular.
+
 ## [0.1.2] - 2026-11-22
 
 ### Changed

@@ -6,12 +6,15 @@ notes, see [Implementation](IMPLEMENTATION.md).
 
 ## 1. Install MIMIC
 
-MIMIC requires Python 3.10 or newer. From the repository root, install the
-package in editable mode:
+MIMIC requires Python 3.10 or newer. Install the published package with:
 
 ```bash
-python -m pip install -e .
+python -m pip install mimic-tabular
 ```
+
+The PyPI distribution is named `mimic-tabular`; import it in Python as
+`mimic`. If you are developing from a source checkout, install the checkout
+instead with `python -m pip install -e ".[dev]"` from the repository root.
 
 The default neural modes use PyTorch, which is installed as a package dependency.
 To check the installed package version:
