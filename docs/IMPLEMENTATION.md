@@ -18,7 +18,7 @@ It should support:
 * `impute(X, columns=None, return_confidence=False)`: fill missing values, including target columns treated as ordinary missing columns;
 * `sample(n_samples, condition=None, return_trace=False)`: generate synthetic rows in embedding space and decode them;
 * `confidence(X, columns=None)`: return uncertainty and bias-variance-style diagnostics for entries;
-* `plot(X=None, embedding_columns=None, color_by=None, center=None, random_state=None, ax=None)`: plot two classical-MDS views, one from the preprocessed original data and one from MIMIC embeddings, optionally restricted to selected feature embedding blocks.
+* `plot(X=None, embedding_columns=None, color_by=None, center=None, random_state=None, ax=None, method="imste")`: plot 2D views of the preprocessed original data and MIMIC embeddings. IMSTE is the default; classical MDS remains selectable with `method="mds"`.
 
 The implementation should follow scikit-learn conventions: constructor arguments should be stored without side effects, learned attributes should end with `_`, and fitted state should be checked before inference.
 
@@ -689,12 +689,17 @@ When `return_trace=True`, the trace contains both `trace_type="embedding"` rows 
 
 ## 9. Plotting
 
-`plot(X=None, embedding_columns=None, color_by=None, center=None, random_state=None, ax=None)` should provide a diagnostic visualization of the learned representation.
+`plot(X=None, embedding_columns=None, color_by=None, center=None, random_state=None, ax=None, method="imste")` provides a diagnostic visualization of the learned representation.
 
 The method should produce two side-by-side plots:
 
-1. classical MDS in 2D on the original data after numeric preprocessing;
-2. classical MDS in 2D on the MIMIC embedding returned by `transform(X)`.
+1. IMSTE in 2D on the original data after numeric preprocessing;
+2. IMSTE in 2D on the MIMIC embedding returned by `transform(X)`.
+
+IMSTE is the default layout method. It is fit independently to the rows in
+each panel, so each call produces a transductive layout for the supplied rows.
+`method="mds"` selects the retained classical-MDS implementation. The
+`center` option applies to classical MDS; `random_state` seeds either method.
 
 The original-data panel must use a numeric representation before MDS. A pragmatic default is the same preprocessing discipline used internally:
 
@@ -711,9 +716,9 @@ $$
 
 If `embedding_columns` is provided, it should be a column name or list of fitted modelled column names. The embedding panel should then use only those columns' embedding slices, preserving the slice order requested by the caller. Unknown names should raise a clear `ValueError`.
 
-Both panels should use classical MDS from a distance matrix. The default distance is Euclidean distance on the numeric matrix used for that panel.
+Both methods use Euclidean geometry on the numeric matrix used for each panel.
 
-The `center` argument controls how the data are centred before MDS:
+For `method="mds"`, the `center` argument controls how the data are centred:
 
 * `center=None`: centre using the data mean;
 * `center="random"`: choose a random observed instance as the centre;
@@ -727,7 +732,8 @@ Centres are useful because high-dimensional projections can produce fish-eye eff
 The method should return matplotlib objects rather than only displaying the plot:
 
 ```python
-fig, axes = mimic.plot(X, embedding_columns=["age", "income"], color_by="outcome", center="random")
+fig, axes = mimic.plot(X, embedding_columns=["age", "income"], color_by="outcome")
+fig, axes = mimic.plot(X, method="mds", embedding_columns=["age", "income"], color_by="outcome", center="random")
 ```
 
 If `X` is omitted, `plot` should use the fitted training data when available. If `ax` is supplied, it should accept either two axes or a container from which two axes can be derived.
@@ -994,7 +1000,7 @@ Clear errors matter because the framework has several moving parts. Validation s
 7. Implement global concatenated `transform`.
 8. Implement neighbour indexing and SMOTE-style sampling.
 9. Add displacement sampling and trace records.
-10. Implement `plot` with two classical-MDS panels for preprocessed original data and MIMIC embeddings.
+10. Implement `plot` with two IMSTE panels for preprocessed original data and MIMIC embeddings, with classical MDS as an alternate method.
 11. Add optional `ResNetEncoder`.
 
 The implementation should start with correctness and inspectability. Performance optimisations, richer embedding combiners, calibration layers, and privacy filters can be added once the basic estimator contract is stable.

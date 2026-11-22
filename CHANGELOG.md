@@ -5,6 +5,17 @@ from the section matching the package version and release tag.
 
 ## [Unreleased]
 
+## [0.1.4] - 2026-11-22
+
+### Added
+
+- Use IMSTE by default for 2D layouts in `MIMIC.plot`, retaining classical MDS
+  through `method="mds"`.
+
+### Changed
+
+- Require IMSTE 0.8.10 or later for the default plotting method.
+
 ## [0.1.3] - 2026-11-22
 
 ### Changed

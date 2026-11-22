@@ -1025,15 +1025,50 @@ class MIMIC(BaseEstimator, TransformerMixin):
             return_distance=True,
         )
 
-    def plot(self, X=None, embedding_columns=None, color_by=None, center=None, random_state=None, ax=None):
+    def plot(
+        self,
+        X=None,
+        embedding_columns=None,
+        color_by=None,
+        center=None,
+        random_state=None,
+        ax=None,
+        method="imste",
+    ):
+        """Plot 2D views of the input data and learned MIMIC embeddings.
+
+        ``method`` selects ``"imste"`` (the default) or ``"mds"``. IMSTE
+        learns a layout for the rows supplied to this call; classical MDS is
+        retained for compatibility and distance-based views. ``center`` only
+        applies when ``method="mds"``.
+        """
         check_is_fitted(self, "feature_modules_")
         import matplotlib.pyplot as plt
+
+        method = str(method).lower()
+        if method not in {"imste", "mds"}:
+            raise ValueError("method must be 'imste' or 'mds'")
 
         X = self.train_X_ if X is None else self._as_dataframe(X)
         original = self._plot_original_matrix(X)
         embedding = self._select_embedding_columns(self.transform(X), embedding_columns)
-        orig_xy = self._classical_mds(original, center=center, random_state=random_state)
-        emb_xy = self._classical_mds(embedding, center=center, random_state=random_state)
+        if method == "imste":
+            from imste import IteratedMinimumSpanningTreeEmbedder
+
+            seed = self.random_state if random_state is None else random_state
+            if seed is None:
+                seed = 42
+            orig_xy = IteratedMinimumSpanningTreeEmbedder(
+                n_components=2,
+                random_state=seed,
+            ).fit_transform(original)
+            emb_xy = IteratedMinimumSpanningTreeEmbedder(
+                n_components=2,
+                random_state=seed,
+            ).fit_transform(embedding)
+        else:
+            orig_xy = self._classical_mds(original, center=center, random_state=random_state)
+            emb_xy = self._classical_mds(embedding, center=center, random_state=random_state)
 
         if ax is None:
             fig, axes = plt.subplots(1, 2, figsize=(11, 4))
@@ -1044,7 +1079,12 @@ class MIMIC(BaseEstimator, TransformerMixin):
                 raise ValueError("ax must contain two axes")
 
         colors, is_numeric = self._plot_colors(X, color_by)
-        for axis, xy, title in zip(axes[:2], [orig_xy, emb_xy], ["Original data MDS", "MIMIC embedding MDS"]):
+        method_name = "IMSTE" if method == "imste" else "MDS"
+        for axis, xy, title in zip(
+            axes[:2],
+            [orig_xy, emb_xy],
+            [f"Original data {method_name}", f"MIMIC embedding {method_name}"],
+        ):
             if colors is None:
                 axis.scatter(xy[:, 0], xy[:, 1], s=24)
             elif is_numeric:
@@ -1060,8 +1100,8 @@ class MIMIC(BaseEstimator, TransformerMixin):
                     fontsize="small",
                 )
             axis.set_title(title)
-            axis.set_xlabel("MDS 1")
-            axis.set_ylabel("MDS 2")
+            axis.set_xlabel(f"{method_name} 1")
+            axis.set_ylabel(f"{method_name} 2")
         fig.tight_layout()
         return fig, axes[:2]
 
