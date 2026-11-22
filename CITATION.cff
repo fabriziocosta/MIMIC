@@ -5,6 +5,7 @@ authors:
   - family-names: Costa
     given-names: Fabrizio
 version: 0.1.1
+doi: 10.5281/zenodo.24445491
 repository-code: "https://github.com/fabriziocosta/MIMIC"
 type: software
 license: MIT

@@ -1,6 +1,7 @@
 # MIMIC
 
 [![Read the Docs](https://app.readthedocs.org/projects/mimic-framework/badge/?version=latest)](https://mimic-framework.readthedocs.io/en/latest/)
+[![DOI](https://zenodo.org/badge/1288202888.svg)](https://doi.org/10.5281/zenodo.24445490)
 
 MIMIC stands for **Modular Inference for Missingness, Inconsistency, and
 Creation**. It is a modular framework for working with mixed tabular data. It treats
