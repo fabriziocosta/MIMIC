@@ -5,7 +5,7 @@
 <br>
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/fabriziocosta/MIMIC/v0.1.5/assets/mimic.png" alt="MIMIC logo" width="64">
+  <img src="https://raw.githubusercontent.com/fabriziocosta/MIMIC/master/assets/mimic.png" alt="MIMIC logo" width="64">
 </p>
 
 
