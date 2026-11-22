@@ -13,6 +13,7 @@ nav:
   - Getting started: GETTING_STARTED.md
   - Development: DEVELOPMENT.md
   - Implementation: IMPLEMENTATION.md
+  - Mathematical mode reference: MODES.md
   - Research white paper: WHITEPAPER.md
   - MIMIC for Images: IMAGE_WORKFLOWS.md
   - Versioning: VERSIONING.md
