@@ -18,8 +18,8 @@ feature from the rest of the row.
   environment setup, code map, tests, and release pointers.
 - **Looking for design details?** Read the [white paper](docs/WHITEPAPER.md)
   or the [implementation notes](docs/IMPLEMENTATION.md).
-- **Working with images?** See [MIMIC for Images](docs/VISION.md) and
-  the [`vision/` notebooks](vision/notebooks/).
+- **Working with images?** See [MIMIC for Images](docs/IMAGE_WORKFLOWS.md) and
+  the [`image_workflows/` notebooks](image_workflows/notebooks/).
 
 This README is the project overview and API tour. The onboarding guides provide
 step-by-step paths for using and developing MIMIC.
@@ -324,15 +324,16 @@ pip install -e ".[dev]"
 ## Project Structure
 
 - `src/mimic/`: package source code.
-- `src/mimic_vision/`: image and vision-oriented helpers.
+- `src/mimic_vision/`: image-oriented helpers.
 - `tests/`: regression and behaviour tests.
 - `notebooks/`: worked examples and operating-mode demonstrations.
-- `vision/notebooks/`: image dataset, embedding, visualization, and synthesis workflows.
+- `image_workflows/notebooks/`: image dataset, embedding, visualization, and
+  synthesis workflows.
 - [`docs/GETTING_STARTED.md`](docs/GETTING_STARTED.md): first-run user guide.
 - [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md): contributor onboarding.
 - [`docs/WHITEPAPER.md`](docs/WHITEPAPER.md): conceptual overview and motivation.
 - [`docs/IMPLEMENTATION.md`](docs/IMPLEMENTATION.md): implementation details and API design notes.
-- [`docs/VISION.md`](docs/VISION.md): applying MIMIC to image data.
+- [`docs/IMAGE_WORKFLOWS.md`](docs/IMAGE_WORKFLOWS.md): applying MIMIC to image data.
 
 ## Development
 

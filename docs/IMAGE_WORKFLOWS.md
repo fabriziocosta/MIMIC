@@ -13,7 +13,7 @@ The core abstraction stays unchanged:
 - Missingness, prediction, embedding, and generation are handled by modelling
   each feature from the rest of the row.
 
-For vision data, the row is an image vector. For a grayscale `28 x 28` image,
+For image data, the row is an image vector. For a grayscale `28 x 28` image,
 the row has `784` pixel features. For an RGB `32 x 32` image, the row has
 `3,072` pixel-channel features.
 
@@ -49,7 +49,7 @@ This is deliberately simple: the image workflow does not start from convolutiona
 assumptions. It first asks how far the row-wise MIMIC framework can go when the
 features happen to be pixels.
 
-The shared vision workflow remains a pure tabular residual MLP. All pixels use
+The shared image workflow remains a pure tabular residual MLP. All pixels use
 one `SharedResNetEncoder`; learned pixel identities and normalized Fourier
 row/column coordinates condition its residual blocks through FiLM. RGB data
 also includes a normalized channel coordinate. The target pixel is masked
@@ -175,7 +175,7 @@ cover a useful progression:
 - more varied grayscale objects;
 - small color natural images.
 
-Together, they give a compact benchmark path for developing the vision version
+Together, they give a compact benchmark path for developing the image version
 of MIMIC.
 
 ## Repository Layout
@@ -196,21 +196,21 @@ of MIMIC.
   onto plot axes where `O-X` is the x-axis and `O-Y` is the y-axis. Projection
   uses raw flattened pixel vectors by default, with an `embedding` option ready
   for a future MIMIC image embedding matrix.
-- `vision/notebooks/01_download_and_filter.ipynb` demonstrates dataset download,
+- `image_workflows/notebooks/01_download_and_filter.ipynb` demonstrates dataset download,
   target filtering, per-target sampling, and serialization.
-- `vision/notebooks/02_fit_mimic_embeddings.ipynb` loads a serialized dataset by
+- `image_workflows/notebooks/02_fit_mimic_embeddings.ipynb` loads a serialized dataset by
   filename, fits MIMIC on the flattened image rows, computes embeddings with
   `transform`, and serializes the embedding matrix.
-- `vision/notebooks/03_visualise_2d_images.ipynb` loads a serialized dataset by
+- `image_workflows/notebooks/03_visualise_2d_images.ipynb` loads a serialized dataset by
   filename, optionally loads a serialized embedding artifact, and demonstrates
   PCA plus reference-axis layouts with non-overlapping image thumbnails.
-- `vision/notebooks/04_smote_embedding_synthesis.ipynb` loads a serialized dataset,
+- `image_workflows/notebooks/04_smote_embedding_synthesis.ipynb` loads a serialized dataset,
   saved MIMIC model, and embedding artifact, selects two neighboring embeddings,
   interpolates between them, decodes the intermediate embedding, and displays
   the resynthesized image.
-- `vision/notebooks/05_iterated_mimic_embeddings.ipynb` fits an `IteratedMIMIC` stack,
+- `image_workflows/notebooks/05_iterated_mimic_embeddings.ipynb` fits an `IteratedMIMIC` stack,
   saves its top-level embeddings, and persists the fitted iterated model.
-- `vision/notebooks/06_iterated_smote_synthesis.ipynb` interpolates between top-level
+- `image_workflows/notebooks/06_iterated_smote_synthesis.ipynb` interpolates between top-level
   iterated embeddings and decodes through all levels back to an image.
 
 `IteratedMIMIC` preserves each pixel or feature embedding as a vector block at
@@ -220,8 +220,8 @@ independent scalar target.
 
 Notebook filename parameters accept either an explicit filename or `"last"`.
 The default `"last"` selects the most recently generated matching dataset,
-embedding, or model artifact from `data/vision/`.
+embedding, or model artifact from `data/images/`.
 
-Vision data is organized by lifecycle under `data/vision/`: downloaded source
+Image data is organized by lifecycle under `data/images/`: downloaded source
 data in `raw/`, prepared datasets in `serialized/`, learned representations in
 `embeddings/`, and fitted estimators in `models/`.

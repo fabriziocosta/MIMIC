@@ -15,8 +15,8 @@ synthetic data generation.
   estimator and its components.
 - **Read the research context:** [White paper](WHITEPAPER.md) explains the
   motivation and design.
-- **Explore image workflows:** [MIMIC for Images](VISION.md) describes applying
-  MIMIC to image data and links to its notebooks.
+- **Explore image workflows:** [MIMIC for Images](IMAGE_WORKFLOWS.md) describes
+  applying MIMIC to image data and links to its notebooks.
 - **Release a version:** [Versioning](VERSIONING.md) covers version numbers,
   changelog entries, and tags.
 

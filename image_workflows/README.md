@@ -1,6 +1,6 @@
 # MIMIC for Images workspace
 
-The image workflow guide is maintained in [the project documentation](../docs/VISION.md).
+The image workflow guide is maintained in [the project documentation](../docs/IMAGE_WORKFLOWS.md).
 
 This directory contains the image workflow notebooks. Open them from the
 repository root so their relative paths resolve correctly:

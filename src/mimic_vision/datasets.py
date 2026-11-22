@@ -40,10 +40,10 @@ class VisionEmbedding:
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-VISION_DATA_DIR = PROJECT_ROOT / "data" / "vision"
-RAW_DATA_DIR = VISION_DATA_DIR / "raw"
-SERIALIZED_DATASET_DIR = VISION_DATA_DIR / "serialized"
-SERIALIZED_EMBEDDING_DIR = VISION_DATA_DIR / "embeddings"
+IMAGE_DATA_DIR = PROJECT_ROOT / "data" / "images"
+RAW_DATA_DIR = IMAGE_DATA_DIR / "raw"
+SERIALIZED_DATASET_DIR = IMAGE_DATA_DIR / "serialized"
+SERIALIZED_EMBEDDING_DIR = IMAGE_DATA_DIR / "embeddings"
 
 
 OPENML_DATASETS = {
@@ -98,7 +98,7 @@ def load_vision_dataset(
     resize_scale: float = 1.0,
     as_frame: bool = True,
 ) -> VisionDataset:
-    """Download, filter, normalize, and vectorize a supported vision dataset.
+    """Download, filter, normalize, and vectorize a supported image dataset.
 
     Parameters
     ----------
@@ -151,7 +151,7 @@ def load_vision_dataset(
 
 
 def vision_dataset_filename(dataset: VisionDataset, *, split: str | None = None) -> str:
-    """Return a readable filename for a filtered, vectorized vision dataset."""
+    """Return a readable filename for a filtered, vectorized image dataset."""
 
     classes = "-".join(str(int(value)) for value in sorted(dataset.y.unique()))
     shape = "x".join(str(part) for part in dataset.image_shape)
@@ -166,7 +166,7 @@ def save_vision_dataset(
     split: str | None = None,
     filename: str | None = None,
 ) -> Path:
-    """Serialize a prepared vision dataset and return the written path."""
+    """Serialize a prepared image dataset and return the written path."""
 
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)

@@ -13,7 +13,7 @@ nav:
   - Development: DEVELOPMENT.md
   - Implementation: IMPLEMENTATION.md
   - Research white paper: WHITEPAPER.md
-  - MIMIC for Images: VISION.md
+  - MIMIC for Images: IMAGE_WORKFLOWS.md
   - Versioning: VERSIONING.md
 
 strict: true

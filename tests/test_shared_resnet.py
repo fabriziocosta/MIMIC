@@ -131,7 +131,7 @@ def test_shared_group_schema_validation(group, message):
         model.fit(frame)
 
 
-def test_fourier_descriptors_and_vision_coordinates_are_deterministic():
+def test_fourier_descriptors_and_image_coordinates_are_deterministic():
     coordinates = np.asarray([[0.0, 0.0], [1.0, 1.0]], dtype=np.float32)
     first = SharedResNetEncoder.fourier_descriptors(coordinates, frequencies=2)
     second = SharedResNetEncoder.fourier_descriptors(coordinates, frequencies=2)
