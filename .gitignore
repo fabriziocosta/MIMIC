@@ -17,6 +17,7 @@ venv/
 env/
 .ipynb_checkpoints/
 notebooks/.ipynb_checkpoints/
-manuscript/artifacts/
+# Manuscript materials are maintained locally and are not part of the repo.
+manuscript/
 data/
 *.log

@@ -11,3 +11,9 @@ repository root so their relative paths resolve correctly:
 4. `04_smote_embedding_synthesis.ipynb` synthesizes from embeddings.
 5. `05_iterated_mimic_embeddings.ipynb` fits stacked embeddings.
 6. `06_iterated_smote_synthesis.ipynb` synthesizes from stacked embeddings.
+
+Downloaded datasets and notebook intermediates should stay in the ignored
+root-level `data/` directory. The workflow notebooks and their expected
+intermediate files are described in the
+[image workflow documentation](../docs/IMAGE_WORKFLOWS.md). For the core
+tabular examples, see the repository-level `notebooks/` directory.

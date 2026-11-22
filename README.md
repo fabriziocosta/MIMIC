@@ -323,17 +323,25 @@ pip install -e ".[dev]"
 
 ## Project Structure
 
-- `src/mimic/`: package source code.
-- `src/mimic_vision/`: image-oriented helpers.
-- `tests/`: regression and behaviour tests.
-- `notebooks/`: worked examples and operating-mode demonstrations.
-- `image_workflows/notebooks/`: image dataset, embedding, visualization, and
-  synthesis workflows.
-- [`docs/GETTING_STARTED.md`](docs/GETTING_STARTED.md): first-run user guide.
-- [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md): contributor onboarding.
-- [`docs/WHITEPAPER.md`](docs/WHITEPAPER.md): conceptual overview and motivation.
-- [`docs/IMPLEMENTATION.md`](docs/IMPLEMENTATION.md): implementation details and API design notes.
-- [`docs/IMAGE_WORKFLOWS.md`](docs/IMAGE_WORKFLOWS.md): applying MIMIC to image data.
+| Path | Purpose |
+| --- | --- |
+| `src/mimic/` | Main installable tabular modeling package. |
+| `src/mimic_vision/` | Image dataset and synthesis helpers used by the image workflows. |
+| `src/mimic_experiments/` | Small experiment entry points distributed with the package. |
+| `tests/` | Tests for the installable packages. |
+| `notebooks/` | Core package tutorials and usage examples. |
+| `image_workflows/` | Image-specific notebooks and their workspace guide. |
+| `docs/` | User, contributor, design, and release documentation. |
+
+See [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md) for setup and contribution
+guidance. Downloaded datasets and local run data belong under the ignored
+root-level `data/` directory. The built documentation site is generated under
+`site/` and is not source content.
+
+The documentation guides are [Getting started](docs/GETTING_STARTED.md),
+[Development](docs/DEVELOPMENT.md), [Implementation](docs/IMPLEMENTATION.md),
+[Research white paper](docs/WHITEPAPER.md), [MIMIC for Images](docs/IMAGE_WORKFLOWS.md),
+and [Versioning](docs/VERSIONING.md).
 
 ## Development
 

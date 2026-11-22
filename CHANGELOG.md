@@ -5,6 +5,13 @@ from the section matching the package version and release tag.
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-11-22
+
+### Changed
+
+- Keep manuscript materials local to the maintainer and exclude them from the repository.
+- Clarify the repository layout, notebook locations, and generated-data conventions.
+
 ## [0.1.1] - 2026-11-22
 
 ### Added

@@ -23,14 +23,18 @@ reinstalling the package.
 
 | Path | Contents |
 | --- | --- |
-| `src/mimic/` | Public tabular estimator, encoders, decoders, generation policies, datasets, diagnostics, CLI |
-| `src/mimic_vision/` | Image-data and image-synthesis helpers |
-| `src/mimic_experiments/` | Experiment entry points |
-| `tests/` | Main package regression and behaviour tests |
-| `manuscript/experiments/` | Reproducible manuscript analysis package and its tests |
-| `notebooks/` | Tutorials, demos, and dataset workflows |
-| `image_workflows/notebooks/` | Image dataset, embedding, visualization, and synthesis workflows |
-| `docs/` | Onboarding and project design documentation |
+| `src/mimic/` | Main tabular package: estimator, encoders, decoders, policies, datasets, diagnostics, and CLI |
+| `src/mimic_vision/` | Image dataset and synthesis helpers |
+| `src/mimic_experiments/` | Small experiment entry points distributed with the package |
+| `tests/` | Tests for the installable packages |
+| `notebooks/` | Core package tutorials and usage examples |
+| `image_workflows/` | Image-specific notebooks and guide |
+| `docs/` | User, contributor, design, and release documentation |
+
+Downloaded datasets and local run data belong under the ignored root-level
+`data/` directory. Keep generated workflow outputs separate from source code
+and notebooks. The MkDocs build writes to the ignored root-level `site/`
+directory; do not edit that generated output directly.
 
 The [MIMIC for Images guide](IMAGE_WORKFLOWS.md) explains the image workflow and
 its relationship to the shared image helpers.
@@ -63,11 +67,15 @@ For Parquet and Excel file handling, install a pandas I/O engine such as
 
 ## Work with notebooks
 
-Open notebooks from the repository root so relative paths resolve as expected.
+Open core notebooks from the repository root so relative paths resolve as expected.
 The notebooks add `src/` and `notebooks/` to the import path. Notebook 05 loads
 one of the documented OpenML datasets; the first data load may require network
 access. Keep notebook outputs focused on useful results and clear stale error
 outputs after fixing a failed cell.
+
+Open image workflow notebooks from the repository root as well; their sequence
+and required intermediate files are described in
+[MIMIC for Images](IMAGE_WORKFLOWS.md).
 
 ## Version and release
 
