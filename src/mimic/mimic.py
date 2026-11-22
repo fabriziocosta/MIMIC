@@ -1034,13 +1034,18 @@ class MIMIC(BaseEstimator, TransformerMixin):
         random_state=None,
         ax=None,
         method="imste",
+        imste_n_msts=32,
+        imste_gravity_strength=0.1,
+        imste_mean_shift_iterations=0,
     ):
         """Plot 2D views of the input data and learned MIMIC embeddings.
 
         ``method`` selects ``"imste"`` (the default) or ``"mds"``. IMSTE
         learns a layout for the rows supplied to this call; classical MDS is
         retained for compatibility and distance-based views. ``center`` only
-        applies when ``method="mds"``.
+        applies when ``method="mds"``. IMSTE uses 32 spanning-tree iterations,
+        gravity strength 0.1, and no mean-shift iterations by default. The
+        ``imste_*`` arguments change those settings.
         """
         check_is_fitted(self, "feature_modules_")
         import matplotlib.pyplot as plt
@@ -1060,10 +1065,16 @@ class MIMIC(BaseEstimator, TransformerMixin):
                 seed = 42
             orig_xy = IteratedMinimumSpanningTreeEmbedder(
                 n_components=2,
+                n_msts=imste_n_msts,
+                gravity_strength=imste_gravity_strength,
+                mean_shift_iterations=imste_mean_shift_iterations,
                 random_state=seed,
             ).fit_transform(original)
             emb_xy = IteratedMinimumSpanningTreeEmbedder(
                 n_components=2,
+                n_msts=imste_n_msts,
+                gravity_strength=imste_gravity_strength,
+                mean_shift_iterations=imste_mean_shift_iterations,
                 random_state=seed,
             ).fit_transform(embedding)
         else:

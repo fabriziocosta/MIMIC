@@ -7,6 +7,7 @@ import numpy as np
 import pandas as pd
 
 from mimic.diagnostics import classical_mds_2d
+from imste import IteratedMinimumSpanningTreeEmbedder
 
 GENERATED_COLOR = "#ff2e0e"
 ORIGINAL_MAJORITY_COLOR = "#9aa0a6"
@@ -458,15 +459,40 @@ def plot_global_embedding_color_grid(
     alpha: float = 0.75,
     max_legend_labels: int = 6,
     size: tuple[float, float] = (4, 4),
+    method: str = "imste",
+    n_msts: int = 32,
+    gravity_strength: float = 0.1,
+    mean_shift_iterations: int = 0,
 ):
-    """Plot the full row embedding once per feature, coloured by each raw feature value."""
+    """Plot the full row embedding once per feature, coloured by each raw feature value.
+
+    IMSTE is used by default with 32 spanning-tree iterations, gravity strength
+    0.1, and no mean-shift iterations. Pass ``method="mds"`` to use classical
+    MDS or change the IMSTE settings with ``n_msts``, ``gravity_strength``,
+    and ``mean_shift_iterations``.
+    """
 
     columns = list(model.model_columns_ if columns is None else columns)
     if not columns:
         raise ValueError("columns must contain at least one feature")
 
     H = model.transform(df)
-    coords = classical_mds_2d(H, random_state=random_state)
+    method = str(method).lower()
+    if method == "imste":
+        seed = 42 if random_state is None else random_state
+        coords = np.asarray(
+            IteratedMinimumSpanningTreeEmbedder(
+                n_components=2,
+                n_msts=n_msts,
+                gravity_strength=gravity_strength,
+                mean_shift_iterations=mean_shift_iterations,
+                random_state=seed,
+            ).fit_transform(H),
+        )
+    elif method == "mds":
+        coords = classical_mds_2d(H, random_state=random_state).to_numpy()
+    else:
+        raise ValueError("method must be 'imste' or 'mds'")
     n_cols = max(1, int(n_cols))
     n_rows = int(np.ceil(len(columns) / n_cols))
     panel_width, panel_height = size
@@ -482,8 +508,8 @@ def plot_global_embedding_color_grid(
         values = df[column]
         if pd.api.types.is_numeric_dtype(values):
             scatter = ax.scatter(
-                coords["mds1"],
-                coords["mds2"],
+                coords[:, 0],
+                coords[:, 1],
                 c=pd.to_numeric(values, errors="coerce"),
                 s=point_size,
                 alpha=alpha,
@@ -496,8 +522,8 @@ def plot_global_embedding_color_grid(
             codes, uniques = pd.factorize(labels)
             cmap = plt.get_cmap("tab20", max(1, len(uniques)))
             ax.scatter(
-                coords["mds1"],
-                coords["mds2"],
+                coords[:, 0],
+                coords[:, 1],
                 c=codes,
                 s=point_size,
                 alpha=alpha,
@@ -615,8 +641,23 @@ def plot_pareto_feature_pairs(
     *,
     max_pairs: int = 6,
     size: tuple[float, float] = (4, 4),
+    random_state=None,
+    method: str = "imste",
+    n_msts: int = 32,
+    gravity_strength: float = 0.1,
+    mean_shift_iterations: int = 0,
 ):
-    """Plot Pareto-optimal feature-pair embeddings coloured by the target column."""
+    """Plot Pareto-optimal feature-pair embeddings coloured by the target column.
+
+    IMSTE is used by default with 32 spanning-tree iterations, gravity strength
+    0.1, and no mean-shift iterations. Pass ``method="mds"`` to use classical
+    MDS or change the IMSTE settings with ``n_msts``, ``gravity_strength``,
+    and ``mean_shift_iterations``.
+    """
+
+    method = str(method).lower()
+    if method not in {"imste", "mds"}:
+        raise ValueError("method must be 'imste' or 'mds'")
 
     report = pareto_feature_pair_report(df, target, columns=columns, max_pairs=max_pairs)
     front = report[report["pareto"]].head(max_pairs)
@@ -650,18 +691,29 @@ def plot_pareto_feature_pairs(
         left_slice = model.embedding_slices_[row.feature_x]
         right_slice = model.embedding_slices_[row.feature_y]
         pair_embedding = np.hstack([H[:, left_slice], H[:, right_slice]])
-        coords = classical_mds_2d(pair_embedding)
+        if method == "imste":
+            seed = 42 if random_state is None else random_state
+            coords = IteratedMinimumSpanningTreeEmbedder(
+                n_components=2,
+                n_msts=n_msts,
+                gravity_strength=gravity_strength,
+                mean_shift_iterations=mean_shift_iterations,
+                random_state=seed,
+            ).fit_transform(pair_embedding)
+        else:
+            coords = classical_mds_2d(pair_embedding, random_state=random_state).to_numpy()
         scatter = ax.scatter(
-            coords["mds1"],
-            coords["mds2"],
+            coords[:, 0],
+            coords[:, 1],
             c=color_values,
             cmap="viridis" if target_is_numeric else "tab10",
             s=16,
             alpha=0.72,
             edgecolor="none",
         )
-        ax.set_xlabel("pair embedding MDS 1")
-        ax.set_ylabel("pair embedding MDS 2")
+        axis_name = "IMSTE" if method == "imste" else "MDS"
+        ax.set_xlabel(f"pair embedding {axis_name} 1")
+        ax.set_ylabel(f"pair embedding {axis_name} 2")
         ax.set_title(
             f"{row.feature_x} + {row.feature_y}\n"
             f"target={row.target_association:.2f}, pair={row.pair_association:.2f}",

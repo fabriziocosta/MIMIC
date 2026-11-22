@@ -148,7 +148,8 @@ reconstructed = stack.inverse_transform(top_embedding)
 `columns="auto"` infers roles using simple heuristics: ID-like or near-unique columns are ignored, small integer-valued numeric columns are classification, other numeric columns are regression, and non-numeric columns are classification. For production use, pass an explicit role mapping such as `columns={"ignore": [...], "regression": [...], "classification": [...]}`.
 
 Embedding plots use IMSTE by default for 2D layouts of the preprocessed input
-and MIMIC embedding. Classical MDS remains available with `method="mds"`.
+and MIMIC embedding, with 32 spanning-tree iterations, gravity strength 0.1,
+and mean shift disabled. Classical MDS remains available with `method="mds"`.
 Plots can focus on selected feature embeddings while colouring by raw dataframe
 values:
 

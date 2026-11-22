@@ -18,7 +18,7 @@ It should support:
 * `impute(X, columns=None, return_confidence=False)`: fill missing values, including target columns treated as ordinary missing columns;
 * `sample(n_samples, condition=None, return_trace=False)`: generate synthetic rows in embedding space and decode them;
 * `confidence(X, columns=None)`: return uncertainty and bias-variance-style diagnostics for entries;
-* `plot(X=None, embedding_columns=None, color_by=None, center=None, random_state=None, ax=None, method="imste")`: plot 2D views of the preprocessed original data and MIMIC embeddings. IMSTE is the default; classical MDS remains selectable with `method="mds"`.
+* `plot(X=None, embedding_columns=None, color_by=None, center=None, random_state=None, ax=None, method="imste", imste_n_msts=32, imste_gravity_strength=0.1, imste_mean_shift_iterations=0)`: plot 2D views of the preprocessed original data and MIMIC embeddings. IMSTE is the default; classical MDS remains selectable with `method="mds"`.
 
 The implementation should follow scikit-learn conventions: constructor arguments should be stored without side effects, learned attributes should end with `_`, and fitted state should be checked before inference.
 
@@ -689,7 +689,7 @@ When `return_trace=True`, the trace contains both `trace_type="embedding"` rows 
 
 ## 9. Plotting
 
-`plot(X=None, embedding_columns=None, color_by=None, center=None, random_state=None, ax=None, method="imste")` provides a diagnostic visualization of the learned representation.
+`plot(X=None, embedding_columns=None, color_by=None, center=None, random_state=None, ax=None, method="imste", imste_n_msts=32, imste_gravity_strength=0.1, imste_mean_shift_iterations=0)` provides a diagnostic visualization of the learned representation.
 
 The method should produce two side-by-side plots:
 
@@ -700,6 +700,10 @@ IMSTE is the default layout method. It is fit independently to the rows in
 each panel, so each call produces a transductive layout for the supplied rows.
 `method="mds"` selects the retained classical-MDS implementation. The
 `center` option applies to classical MDS; `random_state` seeds either method.
+IMSTE uses two output dimensions, 32 spanning-tree iterations, gravity strength
+0.1, and zero mean-shift iterations by default. The `imste_n_msts`,
+`imste_gravity_strength`, and `imste_mean_shift_iterations` arguments adjust
+those settings.
 
 The original-data panel must use a numeric representation before MDS. A pragmatic default is the same preprocessing discipline used internally:
 
