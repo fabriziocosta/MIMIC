@@ -15,8 +15,8 @@ except that `identity` uses the preprocessed row itself as its representation.
 Let the modelled data have \(p\) columns, indexed by \(j\in\mathcal J
 =\{1,\ldots,p\}\). Column \(j\) has task type \(t_j\), either regression
 or classification. Let \(x_i=(x_{i1},\ldots,x_{ip})\) denote row \(i\), and
-let \\(\phi(x_i,m_i)\) be the globally preprocessed row, including encoded
-values and missingness indicators. Here \\(m_i\) records which values are
+let \(\phi(x_i,m_i)\) be the globally preprocessed row, including encoded
+values and missingness indicators. Here \(m_i\) records which values are
 missing. Columns declared as ignored are outside \(\mathcal J\).
 
 For the neural presets, the default encoder for target \(j\) receives the
