@@ -1,7 +1,16 @@
-# MIMIC Tabular
 
-[![Read the Docs](https://img.shields.io/readthedocs/mimic-tabular/latest)](https://mimic-tabular.readthedocs.io/en/latest/)
-[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.24445491.svg)](https://doi.org/10.5281/zenodo.24445490)
+  <a href="https://mimic-tabular.readthedocs.io/en/latest/"><img src="https://img.shields.io/readthedocs/mimic-tabular/latest" alt="Read the Docs"></a>
+  <a href="https://doi.org/10.5281/zenodo.24445490"><img src="https://zenodo.org/badge/DOI/10.5281/zenodo.24445491.svg" alt="DOI"></a>
+
+<br>
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/fabriziocosta/MIMIC/v0.1.5/assets/mimic.png" alt="MIMIC logo" width="64">
+</p>
+
+
+
+<h1 align="center">MIMIC Tabular</h1>
 
 MIMIC stands for **Modular Inference for Missingness, Inconsistency, and
 Creation**. It is a modular framework for working with mixed tabular data. It treats

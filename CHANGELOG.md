@@ -5,6 +5,19 @@ from the section matching the package version and release tag.
 
 ## [Unreleased]
 
+## [0.1.5] - 2026-11-22
+
+### Added
+
+- Add the MIMIC logo to the README and documentation home page.
+
+### Changed
+
+- Set MIMIC's default IMSTE plots to 32 MST iterations, gravity strength 0.1,
+  and zero mean-shift iterations.
+- Add IMSTE layouts and thin gray marker edges to the notebook visualization
+  helpers while retaining classical MDS as an option.
+
 ## [0.1.4] - 2026-11-22
 
 ### Added

@@ -1,5 +1,9 @@
 # MIMIC Tabular
 
+<p align="center">
+  <img src="assets/mimic.png" alt="MIMIC logo" width="64">
+</p>
+
 **Modular Inference for Missingness, Inconsistency, and Creation** is a
 scikit-learn-style framework for mixed tabular data. It learns feature-wise
 models that support imputation, prediction, confidence diagnostics, and
