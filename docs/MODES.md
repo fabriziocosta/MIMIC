@@ -163,7 +163,7 @@ e^*=[e_1\|e_2\|\cdots\|e_p].
 A shared neural trunk \(g_\omega\) maps \(e^*\) to a shared hidden state, and
 target-specific heads \(r_{\omega,j}\) produce all column predictions:
 \[
-s^*=g_\omega\(e^*\),\qquad
+s^*=g_\omega(e^*),\qquad
 \hat x^*_j=r_{\omega,j}(s^*).
 \]
 The row decoder is fitted only on complete modelled training rows
