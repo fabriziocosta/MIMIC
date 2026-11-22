@@ -64,15 +64,19 @@ in [`_preset_components`](https://github.com/fabriziocosta/MIMIC/blob/master/src
 
 ## Identity preset
 
-The identity preset represents a row by its preprocessed modelled values:
+For each modelled column (j), the identity encoder receives the full
+preprocessed row, including column (j), and returns it unchanged. With one
+feature block per modelled column, the concatenated representation is
 \[
-H_i=\phi(x_i,m_i).
+h_{ij}=\phi(x_i,m_i)\quad\text{for every }j,\qquad
+H_i=[\phi(x_i,m_i)\|\cdots\|\phi(x_i,m_i)]
+\quad(p\text{ identical blocks}).
 \]
-Unlike the neural presets, this baseline includes the target coordinate in
-the representation. Its identity decoder selects the corresponding
-preprocessed target coordinate (for categorical targets, the associated
-one-hot scores) and maps it back through the target's output decoding. Thus
-the preset has no learned feature-wise latent encoder or learned row decoder.
+The identity decoder selects the coordinates for its target (for categorical
+targets, the corresponding one-hot scores) and maps them back through the
+target's output decoding. The repeated blocks multiply all pairwise squared
+Euclidean distances by (p), so they do not change nearest-neighbour ordering.
+The preset has no learned feature-wise latent encoder or learned row decoder.
 For generation it applies the selected latent-space policy directly in
 preprocessed feature space, then decodes the resulting coordinates to the
 original column scales and categories.
