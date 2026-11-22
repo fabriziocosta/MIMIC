@@ -1,5 +1,7 @@
 # MIMIC
 
+[![Read the Docs](https://readthedocs.org/projects/mimic-framework/badge/?version=latest)](https://mimic-framework.readthedocs.io/en/latest/)
+
 MIMIC stands for **Modular Inference for Missingness, Inconsistency, and
 Creation**. It is a modular framework for working with mixed tabular data. It treats
 imputation, consistency checking, supervised prediction, uncertainty estimation,
@@ -8,6 +10,7 @@ feature from the rest of the row.
 
 ## Start here
 
+- **Documentation:** Read the [MIMIC-FRAMEWORK docs](https://mimic-framework.readthedocs.io/en/latest/).
 - **New to MIMIC?** Follow the [Getting started guide](docs/GETTING_STARTED.md)
   for installation, a first generation run, and the main estimator methods.
 - **Contributing?** Use the [Development guide](docs/DEVELOPMENT.md) for the
