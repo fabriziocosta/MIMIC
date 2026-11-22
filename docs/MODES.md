@@ -12,15 +12,15 @@ except that `identity` uses the preprocessed row itself as its representation.
 
 ## Notation and shared setup
 
-Let the modelled data have $p$ columns, indexed by
-<img src="assets/modes/equation-01.svg" alt="j\in\mathcal J=\{1,\ldots,p\}" style="vertical-align: middle;">. Column $j$ has task type $t_j$, either
-regression or classification. Let <img src="assets/modes/equation-02.svg" alt="x_i=(x_{i1},\ldots,x_{ip})" style="vertical-align: middle;"> denote row $i$, and
+Let the modelled data have <img src="assets/modes/equation-30.svg" alt="p" style="vertical-align: middle;"> columns, indexed by
+<img src="assets/modes/equation-01.svg" alt="j\in\mathcal J=\{1,\ldots,p\}" style="vertical-align: middle;">. Column <img src="assets/modes/equation-31.svg" alt="j" style="vertical-align: middle;"> has task type <img src="assets/modes/equation-32.svg" alt="t_j" style="vertical-align: middle;">, either
+regression or classification. Let <img src="assets/modes/equation-02.svg" alt="x_i=(x_{i1},\ldots,x_{ip})" style="vertical-align: middle;"> denote row <img src="assets/modes/equation-33.svg" alt="i" style="vertical-align: middle;">, and
 let <img src="assets/modes/equation-03.svg" alt="\phi(x_i,m_i)" style="vertical-align: middle;"> be the globally preprocessed row, including encoded
-values and missingness indicators. Here $m_i$ records which values are
+values and missingness indicators. Here <img src="assets/modes/equation-34.svg" alt="m_i" style="vertical-align: middle;"> records which values are
 missing. Columns declared as ignored are outside <img src="assets/modes/equation-04.svg" alt="\mathcal J" style="vertical-align: middle;">.
 
-For the neural presets, the default encoder for target $j$ receives the
-preprocessed context with target column $j$ excluded: <img src="assets/modes/equation-05.svg" alt="u_{ij}=\phi_{-j}(x_i,m_i),\qquad h_{ij}=E_j(u_{ij})\in\mathbb R^{d_j}." style="vertical-align: middle;">
+For the neural presets, the default encoder for target <img src="assets/modes/equation-35.svg" alt="j" style="vertical-align: middle;"> receives the
+preprocessed context with target column <img src="assets/modes/equation-36.svg" alt="j" style="vertical-align: middle;"> excluded: <img src="assets/modes/equation-05.svg" alt="u_{ij}=\phi_{-j}(x_i,m_i),\qquad h_{ij}=E_j(u_{ij})\in\mathbb R^{d_j}." style="vertical-align: middle;">
 
 The representation of a row is the concatenation of its feature blocks: <img src="assets/modes/equation-06.svg" alt="H_i=[h_{i1}\,\,\Vert\,\,h_{i2}\,\,\Vert\,\,\cdots\,\,\Vert\,\,h_{ip}] \in\mathbb R^{D},\qquad D=\sum_j d_j." style="vertical-align: middle;">
 
@@ -35,8 +35,8 @@ and cross-entropy for a classification target. A target-specific predictive
 model is fitted using observed-target rows
 <img src="assets/modes/equation-08.svg" alt="\mathcal I_j=\{i:x_{ij}\text{ is observed}\}" style="vertical-align: middle;">. In schematic form: <img src="assets/modes/equation-09.svg" alt="\min_{E_j,a_j}\; \frac{1}{|\mathcal I_j|} \sum_{i\in\mathcal I_j} \ell_j\!\left(a_j(u_{ij}),x_{ij}\right), \qquad \min_{D_j}\; \frac{1}{|\mathcal I_j|} \sum_{i\in\mathcal I_j} \ell_j\!\left(D_j(h_{ij}),x_{ij}\right)." style="vertical-align: middle;">
 
-Here $a_j$ is the supervised output head used while learning the neural
-encoder; $D_j$ is the fitted feature decoder. These equations specify the
+Here <img src="assets/modes/equation-37.svg" alt="a_j" style="vertical-align: middle;"> is the supervised output head used while learning the neural
+encoder; <img src="assets/modes/equation-38.svg" alt="D_j" style="vertical-align: middle;"> is the fitted feature decoder. These equations specify the
 training roles, not a claim that the non-convex neural optimisation reaches a
 global minimum.
 
@@ -48,14 +48,14 @@ in [`_preset_components`](https://github.com/fabriziocosta/MIMIC/blob/master/src
 
 ## Identity preset
 
-For each modelled column $j$, the identity encoder receives the full
-preprocessed row, including column $j$, and returns it unchanged. With one
+For each modelled column <img src="assets/modes/equation-39.svg" alt="j" style="vertical-align: middle;">, the identity encoder receives the full
+preprocessed row, including column <img src="assets/modes/equation-40.svg" alt="j" style="vertical-align: middle;">, and returns it unchanged. With one
 feature block per modelled column, the concatenated representation is <img src="assets/modes/equation-10.svg" alt="h_{ij}=\phi(x_i,m_i)\quad\text{for every }j,\qquad H_i=[\phi(x_i,m_i)\,\Vert\,\cdots\,\Vert\,\phi(x_i,m_i)] \quad(p\text{ identical blocks})." style="vertical-align: middle;">
 
 The identity decoder selects the coordinates for its target (for categorical
 targets, the corresponding one-hot scores) and maps them back through the
 target's output decoding. The repeated blocks multiply all pairwise squared
-Euclidean distances by $p$, so they do not change nearest-neighbour ordering.
+Euclidean distances by <img src="assets/modes/equation-41.svg" alt="p" style="vertical-align: middle;">, so they do not change nearest-neighbour ordering.
 The preset has no learned feature-wise latent encoder or learned row decoder.
 For generation it applies the selected latent-space policy directly in
 preprocessed feature space, then decodes the resulting coordinates to the
@@ -81,46 +81,46 @@ highest-probability class: <img src="assets/modes/equation-14.svg" alt="\hat x^*
 This preset is deterministic at generation time: it returns point predictions
 and does not draw values from the conditional samplers.
 
-The target block $h_j$ is itself computed from the input with feature $j$
+The target block <img src="assets/modes/equation-42.svg" alt="h_j" style="vertical-align: middle;"> is itself computed from the input with feature <img src="assets/modes/equation-43.svg" alt="j" style="vertical-align: middle;">
 excluded. Therefore “direct” means direct decoding from the learned
-target-specific block; it does not mean that the encoder was given $x_j$.
+target-specific block; it does not mean that the encoder was given <img src="assets/modes/equation-44.svg" alt="x_j" style="vertical-align: middle;">.
 
 ## Factorised preset
 
 Factorised generation first makes the same deterministic initial decode as the
 direct preset. It then performs three ordered passes over the modelled columns.
-For each unconditioned column $j$, it forms the fixed context <img src="assets/modes/equation-15.svg" alt="H^*_{-j}=(h^*_1,\ldots,h^*_{j-1},h^*_{j+1},\ldots,h^*_p)" style="vertical-align: middle;">
+For each unconditioned column <img src="assets/modes/equation-45.svg" alt="j" style="vertical-align: middle;">, it forms the fixed context <img src="assets/modes/equation-15.svg" alt="H^*_{-j}=(h^*_1,\ldots,h^*_{j-1},h^*_{j+1},\ldots,h^*_p)" style="vertical-align: middle;">
 
 and samples <img src="assets/modes/equation-16.svg" alt="x^{(r)}_j\sim q_j(\,\cdot\mid H^*_{-j}),\qquad r=1,2,3." style="vertical-align: middle;">
 
 Conditioned columns are kept at their requested values. For a categorical
-column, $q_j$ is the fitted conditional class-probability distribution. For
-a numerical column, the default neural sampler represents $q_j$ as a
-$K$-component Gaussian mixture: <img src="assets/modes/equation-17.svg" alt="q_j(y\mid H^*_{-j}) =\sum_{k=1}^{K}\pi_{jk}(H^*_{-j}) \,\mathcal N\!\left(y;\mu_{jk}(H^*_{-j}),\sigma^2_{jk}(H^*_{-j})\right)." style="vertical-align: middle;">
+column, <img src="assets/modes/equation-46.svg" alt="q_j" style="vertical-align: middle;"> is the fitted conditional class-probability distribution. For
+a numerical column, the default neural sampler represents <img src="assets/modes/equation-47.svg" alt="q_j" style="vertical-align: middle;"> as a
+<img src="assets/modes/equation-48.svg" alt="K" style="vertical-align: middle;">-component Gaussian mixture: <img src="assets/modes/equation-17.svg" alt="q_j(y\mid H^*_{-j}) =\sum_{k=1}^{K}\pi_{jk}(H^*_{-j}) \,\mathcal N\!\left(y;\mu_{jk}(H^*_{-j}),\sigma^2_{jk}(H^*_{-j})\right)." style="vertical-align: middle;">
 
 The sampler draws a component according to its mixture weight, then draws a
 value from that component. The implementation supports component temperature
 and noise scale; their defaults are both one.
 
-The latent context $H^*$ stays fixed through all three passes. Later sampled
+The latent context <img src="assets/modes/equation-49.svg" alt="H^*" style="vertical-align: middle;"> stays fixed through all three passes. Later sampled
 column values are not re-encoded and fed back into other conditional samplers.
 Consequently these passes are not Gibbs sampling from a joint distribution,
 and the conditionals <img src="assets/modes/equation-18.svg" alt="q_j(x_j\mid H^*_{-j})" style="vertical-align: middle;"> need not be compatible with any
-single joint distribution over $x$. Factorised mode is a practical,
+single joint distribution over <img src="assets/modes/equation-50.svg" alt="x" style="vertical-align: middle;">. Factorised mode is a practical,
 feature-wise stochastic decoder.
 
 ## Joint preset
 
 Joint mode first computes a conditional-evidence block for every target. For
-each $j$, it applies that target's conditional sampler to the other
-embedding blocks: $e_j=c_j(H^*_{-j}).$
+each <img src="assets/modes/equation-51.svg" alt="j" style="vertical-align: middle;">, it applies that target's conditional sampler to the other
+embedding blocks: <img src="assets/modes/equation-52.svg" alt="e_j=c_j(H^*_{-j})." style="vertical-align: middle;">
 
-For a categorical target, $e_j$ is its vector of predicted class
-probabilities. For a numerical target, $e_j$ concatenates the predicted
+For a categorical target, <img src="assets/modes/equation-53.svg" alt="e_j" style="vertical-align: middle;"> is its vector of predicted class
+probabilities. For a numerical target, <img src="assets/modes/equation-54.svg" alt="e_j" style="vertical-align: middle;"> concatenates the predicted
 mixture weights, component means, and component scales. The complete evidence
 vector is <img src="assets/modes/equation-19.svg" alt="e^*=[e_1\,\Vert\,e_2\,\Vert\,\cdots\,\Vert\,e_p]." style="vertical-align: middle;">
 
-A shared neural trunk <img src="assets/modes/equation-20.svg" alt="g_\omega" style="vertical-align: middle;"> maps $e^*$ to a shared hidden state, and
+A shared neural trunk <img src="assets/modes/equation-20.svg" alt="g_\omega" style="vertical-align: middle;"> maps <img src="assets/modes/equation-55.svg" alt="e^*" style="vertical-align: middle;"> to a shared hidden state, and
 target-specific heads <img src="assets/modes/equation-21.svg" alt="r_{\omega,j}" style="vertical-align: middle;"> produce all column predictions: <img src="assets/modes/equation-22.svg" alt="s^*=g_\omega(e^*),\qquad \hat x^*_j=r_{\omega,j}(s^*)." style="vertical-align: middle;">
 
 The row decoder is fitted only on complete modelled training rows
@@ -142,16 +142,16 @@ the average of separate per-target losses.
 | Preset | Representation used for generation | Decode rule | Stochastic output sampling |
 | --- | --- | --- | --- |
 | `identity` | Repeated preprocessed row blocks <img src="assets/modes/equation-26.svg" alt="H=[\phi(x,m)\,\Vert\,\cdots\,\Vert\,\phi(x,m)]" style="vertical-align: middle;"> | Identity coordinate decoding | No |
-| `direct` | Concatenated target-excluded neural blocks $H$ | $D_j(h_j)$, one head per target | No |
-| `factorised` | Same neural blocks $H$ | Initial direct decode, then <img src="assets/modes/equation-27.svg" alt="q_j(x_j\mid H_{-j})" style="vertical-align: middle;"> for three passes | Yes |
-| `joint` | Same neural blocks $H$ | Shared decoder $G([c_j(H_{-j})]_j)$ | No |
+| `direct` | Concatenated target-excluded neural blocks <img src="assets/modes/equation-56.svg" alt="H" style="vertical-align: middle;"> | <img src="assets/modes/equation-57.svg" alt="D_j(h_j)" style="vertical-align: middle;">, one head per target | No |
+| `factorised` | Same neural blocks <img src="assets/modes/equation-58.svg" alt="H" style="vertical-align: middle;"> | Initial direct decode, then <img src="assets/modes/equation-27.svg" alt="q_j(x_j\mid H_{-j})" style="vertical-align: middle;"> for three passes | Yes |
+| `joint` | Same neural blocks <img src="assets/modes/equation-59.svg" alt="H" style="vertical-align: middle;"> | Shared decoder <img src="assets/modes/equation-60.svg" alt="G([c_j(H_{-j})]_j)" style="vertical-align: middle;"> | No |
 
 The latent generation policy (for example, interpolation or displacement) is a
 separate choice from the decoding preset. For the default displacement policy,
-with anchor rows $A,B,C$, the generated embedding is <img src="assets/modes/equation-28.svg" alt="H^*=H(A)+\lambda\bigl(H(C)-H(B)\bigr)," style="vertical-align: middle;">
+with anchor rows <img src="assets/modes/equation-61.svg" alt="A,B,C" style="vertical-align: middle;">, the generated embedding is <img src="assets/modes/equation-28.svg" alt="H^*=H(A)+\lambda\bigl(H(C)-H(B)\bigr)," style="vertical-align: middle;">
 
 where <img src="assets/modes/equation-29.svg" alt="\lambda" style="vertical-align: middle;"> is drawn from the policy's configured interval. In the
-default preset configuration the interval is $[0.25,0.75]$, and neighbours
+default preset configuration the interval is <img src="assets/modes/equation-62.svg" alt="[0.25,0.75]" style="vertical-align: middle;">, and neighbours
 are selected with the mutual-neighbour policy. See the [generation policy
 definition](https://github.com/fabriziocosta/MIMIC/blob/master/src/mimic/policies.py#L8-L25)
 and the [embedding-generation implementation](https://github.com/fabriziocosta/MIMIC/blob/master/src/mimic/mimic.py#L848-L875).
