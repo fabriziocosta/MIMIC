@@ -191,7 +191,7 @@ the average of separate per-target losses.
 
 | Preset | Representation used for generation | Decode rule | Stochastic output sampling |
 | --- | --- | --- | --- |
-| `identity` | Preprocessed row \(\phi(x,m)\) | Identity coordinate decoding | No |
+| `identity` | Repeated preprocessed row blocks \\(H=[\\phi(x,m)\\|\\cdots\\|\\phi(x,m)]\\) | Identity coordinate decoding | No |
 | `direct` | Concatenated target-excluded neural blocks \(H\) | \(D_j(h_j)\), one head per target | No |
 | `factorised` | Same neural blocks \(H\) | Initial direct decode, then \(q_j(x_j\mid H_{-j})\) for three passes | Yes |
 | `joint` | Same neural blocks \(H\) | Shared decoder \(G([c_j(H_{-j})]_j)\) | No |
