@@ -20,12 +20,10 @@ values and missingness indicators. Here $m_i$ records which values are
 missing. Columns declared as ignored are outside $\mathcal J$.
 
 For the neural presets, the default encoder for target $j$ receives the
-preprocessed context with target column $j$ excluded:
-
+preprocessed context with target column $j$ excluded:<br>
 $u_{ij}=\phi_{-j}(x_i,m_i),\qquad h_{ij}=E_j(u_{ij})\in\mathbb R^{d_j}.$
 
-The representation of a row is the concatenation of its feature blocks:
-
+The representation of a row is the concatenation of its feature blocks:<br>
 $H_i=[h_{i1}\,\|\,h_{i2}\,\|\,\cdots\,\|\,h_{ip}] \in\mathbb R^{D},\qquad D=\sum_j d_j.$
 
 Each encoder is trained as a feature prediction task on rows where its target
@@ -37,8 +35,7 @@ conditional representation block and target decoder.
 Write $\ell_j$ for the task loss: squared error for a regression target
 and cross-entropy for a classification target. A target-specific predictive
 model is fitted using observed-target rows
-$\mathcal I_j=\{i:x_{ij}\text{ is observed}\}$. In schematic form:
-
+$\mathcal I_j=\{i:x_{ij}\text{ is observed}\}$. In schematic form:<br>
 $\min_{E_j,a_j}\; \frac{1}{|\mathcal I_j|} \sum_{i\in\mathcal I_j} \ell_j\!\left(a_j(u_{ij}),x_{ij}\right), \qquad \min_{D_j}\; \frac{1}{|\mathcal I_j|} \sum_{i\in\mathcal I_j} \ell_j\!\left(D_j(h_{ij}),x_{ij}\right).$
 
 Here $a_j$ is the supervised output head used while learning the neural
@@ -56,8 +53,7 @@ in [`_preset_components`](https://github.com/fabriziocosta/MIMIC/blob/master/src
 
 For each modelled column $j$, the identity encoder receives the full
 preprocessed row, including column $j$, and returns it unchanged. With one
-feature block per modelled column, the concatenated representation is
-
+feature block per modelled column, the concatenated representation is<br>
 $h_{ij}=\phi(x_i,m_i)\quad\text{for every }j,\qquad H_i=[\phi(x_i,m_i)\|\cdots\|\phi(x_i,m_i)] \quad(p\text{ identical blocks}).$
 
 The identity decoder selects the coordinates for its target (for categorical
@@ -76,20 +72,17 @@ feature-space baseline; it is not a conditional probability model.
 
 ## Direct preset
 
-For each generated embedding $H^*=[h^*_1\\|\\cdots\\|h^*_p]$, direct
+For each generated embedding $H^*=[h^*_1\|\cdots\|h^*_p]$, direct
 decoding applies each target-specific decoder to that target's own feature
-block:
-
+block:<br>
 $\hat x^*_j=D_j(h^*_j),\qquad j\in\mathcal J.$
 
 The implementation's neural regression decoder predicts the conditional
-mixture mean
-
+mixture mean<br>
 $\hat x^*_j=\sum_{k=1}^{K}\pi_{jk}(h^*_j)\,\mu_{jk}(h^*_j),$
 
 before reversing target scaling. For a categorical target it chooses the
-highest-probability class:
-
+highest-probability class:<br>
 $\hat x^*_j=\arg\max_{c\in\mathcal C_j} p_j(c\mid h^*_j).$
 
 This preset is deterministic at generation time: it returns point predictions
@@ -103,19 +96,16 @@ target-specific block; it does not mean that the encoder was given $x_j$.
 
 Factorised generation first makes the same deterministic initial decode as the
 direct preset. It then performs three ordered passes over the modelled columns.
-For each unconditioned column $j$, it forms the fixed context
-
+For each unconditioned column $j$, it forms the fixed context<br>
 $H^*_{-j}=[h^*_1\|\cdots\|h^*_{j-1}\|h^*_{j+1}\|\cdots\|h^*_p]$
 
-and samples
-
+and samples<br>
 $x^{(r)}_j\sim q_j(\,\cdot\mid H^*_{-j}),\qquad r=1,2,3.$
 
 Conditioned columns are kept at their requested values. For a categorical
 column, $q_j$ is the fitted conditional class-probability distribution. For
 a numerical column, the default neural sampler represents $q_j$ as a
-$K$-component Gaussian mixture:
-
+$K$-component Gaussian mixture:<br>
 $q_j(y\mid H^*_{-j}) =\sum_{k=1}^{K}\pi_{jk}(H^*_{-j}) \,\mathcal N\!\left(y;\mu_{jk}(H^*_{-j}),\sigma^2_{jk}(H^*_{-j})\right).$
 
 The sampler draws a component according to its mixture weight, then draws a
@@ -133,27 +123,22 @@ feature-wise stochastic decoder.
 
 Joint mode first computes a conditional-evidence block for every target. For
 each $j$, it applies that target's conditional sampler to the other
-embedding blocks:
-
+embedding blocks:<br>
 $e_j=c_j(H^*_{-j}).$
 
 For a categorical target, $e_j$ is its vector of predicted class
 probabilities. For a numerical target, $e_j$ concatenates the predicted
 mixture weights, component means, and component scales. The complete evidence
-vector is
-
+vector is<br>
 $e^*=[e_1\|e_2\|\cdots\|e_p].$
 
 A shared neural trunk $g_\omega$ maps $e^*$ to a shared hidden state, and
-target-specific heads $r_{\omega,j}$ produce all column predictions:
-
+target-specific heads $r_{\omega,j}$ produce all column predictions:<br>
 $s^*=g_\omega(e^*),\qquad \hat x^*_j=r_{\omega,j}(s^*).$
 
 The row decoder is fitted only on complete modelled training rows
-$\mathcal I_{\mathrm{complete}}
-=\{i:x_{ij}\text{ is observed for every }j\in\mathcal J\}$.
-Its objective is the mean of the per-target losses:
-
+$\mathcal I_{\mathrm{complete}}=\{i:x_{ij}\text{ is observed for every }j\in\mathcal J\}$.
+Its objective is the mean of the per-target losses:<br>
 $\min_\omega\; \frac{1}{p}\sum_{j\in\mathcal J} \frac{1}{|\mathcal I_{\mathrm{complete}}|} \sum_{i\in\mathcal I_{\mathrm{complete}}} \ell_j\!\left(r_{\omega,j}(g_\omega(e_i)),x_{ij}\right).$
 
 Regression heads use squared error and categorical heads use cross-entropy.
@@ -177,8 +162,7 @@ the average of separate per-target losses.
 
 The latent generation policy (for example, interpolation or displacement) is a
 separate choice from the decoding preset. For the default displacement policy,
-with anchor rows $A,B,C$, the generated embedding is
-
+with anchor rows $A,B,C$, the generated embedding is<br>
 $H^*=H(A)+\lambda\bigl(H(C)-H(B)\bigr),$
 
 where $\lambda$ is drawn from the policy's configured interval. In the
