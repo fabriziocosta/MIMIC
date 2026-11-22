@@ -5,6 +5,12 @@ from the section matching the package version and release tag.
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-11-22
+
+### Added
+
+- Add an MIT license and configure software archiving metadata for Zenodo.
+
 ## [0.1.0] - 2026-11-22
 
 Initial public release of MIMIC.

@@ -1,9 +1,10 @@
 cff-version: 1.2.0
-message: "If you use MIMIC, please cite it using this metadata. Once the first release is archived on Zenodo, the concept DOI will be added here."
+message: "If you use MIMIC, please cite the archived release using its DOI."
 title: "MIMIC: Modular Inference for Missingness, Inconsistency, and Creation"
 authors:
   - family-names: Costa
     given-names: Fabrizio
-version: 0.1.0
+version: 0.1.1
 repository-code: "https://github.com/fabriziocosta/MIMIC"
 type: software
+license: MIT

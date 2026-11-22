@@ -1,6 +1,8 @@
 {
   "upload_type": "software",
   "title": "MIMIC: Modular Inference for Missingness, Inconsistency, and Creation",
+  "version": "0.1.1",
+  "license": "mit",
   "creators": [
     {
       "name": "Fabrizio Costa"
