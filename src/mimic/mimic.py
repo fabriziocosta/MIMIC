@@ -20,7 +20,6 @@ from sklearn.base import BaseEstimator, TransformerMixin, clone
 from sklearn.impute import SimpleImputer
 from sklearn.metrics import pairwise_distances
 from sklearn.isotonic import IsotonicRegression
-from sklearn.neighbors import NearestNeighbors
 from sklearn.preprocessing import LabelEncoder, OneHotEncoder, StandardScaler
 from sklearn.utils.validation import check_is_fitted
 from tqdm.auto import tqdm
@@ -36,6 +35,20 @@ from .encoders import (
     SharedTargetEncoder,
 )
 from .policies import GenerationPolicy
+from .neighbours import FastNeighborIndex
+
+
+def _same_categorical_value(left, right) -> bool:
+    """Compare scalar categorical values, treating two missing values as equal."""
+    left_missing = pd.isna(left)
+    right_missing = pd.isna(right)
+    if isinstance(left_missing, (bool, np.bool_)) and isinstance(right_missing, (bool, np.bool_)):
+        if left_missing or right_missing:
+            return bool(left_missing and right_missing)
+    try:
+        return bool(left == right)
+    except (TypeError, ValueError):
+        return False
 
 
 @dataclass
@@ -806,10 +819,46 @@ class MIMIC(BaseEstimator, TransformerMixin):
                 return_trace=return_trace,
             )
             traces.extend(cell_traces)
+        if self.policy_.method == "displacement" and getattr(self.policy_, "categorical_displacement", False):
+            gate_rng = np.random.default_rng(np.random.SeedSequence(self.random_state).spawn(1)[0])
+            traces = self._apply_categorical_displacement(
+                X_new, traces, condition=condition, rng=gate_rng
+            )
         X_new = self._restore_sample_schema(X_new)
         if return_trace:
             return X_new, pd.DataFrame(traces)
         return X_new
+
+    def _apply_categorical_displacement(self, X_new, traces, *, condition, rng):
+        """Apply discrete A/B/C displacement to categorical output columns."""
+        fixed_columns = set(condition or {})
+        for trace in traces:
+            if trace.get("trace_type") != "embedding" or trace.get("method") != "displacement":
+                continue
+            sample_index = int(trace["sample_index"])
+            anchor_pos = int(trace["anchor_position"])
+            from_pos = int(trace["displacement_from_position"])
+            to_pos = int(trace["displacement_to_position"])
+            probability = float(np.clip(trace["lambda"], 0.0, 1.0))
+            changed = []
+            for column in self.classification_columns_:
+                if column in fixed_columns or column not in X_new.columns:
+                    continue
+                value_a = self.train_X_.iloc[anchor_pos][column]
+                value_b = self.train_X_.iloc[from_pos][column]
+                value_c = self.train_X_.iloc[to_pos][column]
+                if not _same_categorical_value(value_a, value_b):
+                    value = value_a
+                elif rng.random() < probability:
+                    value = value_c
+                    if not _same_categorical_value(value_a, value_c):
+                        changed.append(column)
+                else:
+                    value = value_a
+                X_new.iat[sample_index, X_new.columns.get_loc(column)] = value
+            trace["categorical_displacement_applied"] = True
+            trace["categorical_switches"] = changed
+        return traces
 
     def save(self, path):
         """Persist a fitted MIMIC model to a local joblib artifact."""
@@ -984,6 +1033,12 @@ class MIMIC(BaseEstimator, TransformerMixin):
                 "displacement_to_index": self.train_index_[to_pos],
                 "restriction": "basic",
             }
+            if getattr(self.policy_, "categorical_displacement", False):
+                trace.update(
+                    anchor_position=anchor_pos,
+                    displacement_from_position=from_pos,
+                    displacement_to_position=to_pos,
+                )
             sources = {anchor_pos, from_pos, to_pos}
         return h_new, trace, sources
 
@@ -1941,11 +1996,11 @@ class MIMIC(BaseEstimator, TransformerMixin):
         return cols
 
     def _fit_neighbours(self, H):
-        n = len(H)
-        k = min(max(2, self.policy_.n_neighbors + 1), n)
-        model = NearestNeighbors(n_neighbors=k)
-        model.fit(H)
-        return model
+        return FastNeighborIndex(
+            H,
+            n_neighbors=max(1, self.policy_.n_neighbors),
+            random_state=self.random_state,
+        )
 
     def _condition_mask(self, condition):
         if condition is None:
@@ -1960,21 +2015,30 @@ class MIMIC(BaseEstimator, TransformerMixin):
         return mask
 
     def _choose_neighbour(self, pos: int, rng, condition_mask=None):
-        distances, indices = self.neighbour_index_.kneighbors(self.train_embeddings_[[pos]], return_distance=True)
-        candidates = [int(i) for i in indices[0] if int(i) != pos]
+        candidates = [int(i) for i in self._training_neighbours_for(pos)]
         if condition_mask is not None:
             conditioned = [c for c in candidates if condition_mask[c]]
             candidates = conditioned or candidates
         if self.policy_.neighbour_mode == "mutual":
             mutual = []
             for c in candidates:
-                _d, rev = self.neighbour_index_.kneighbors(self.train_embeddings_[[c]], return_distance=True)
-                if pos in [int(i) for i in rev[0]]:
+                if pos in self._training_neighbours_for(c):
                     mutual.append(c)
             candidates = mutual or candidates
         if not candidates:
             return pos
         return int(rng.choice(candidates))
+
+    def _training_neighbours_for(self, pos: int):
+        index = self.neighbour_index_
+        if hasattr(index, "training_neighbors"):
+            return index.training_neighbors(pos)
+        # Continue to support fitted models saved before the approximate-index
+        # adapter was introduced; older artifacts store sklearn's index here.
+        _distances, indices = index.kneighbors(
+            self.train_embeddings_[[pos]], return_distance=True
+        )
+        return [int(neighbor) for neighbor in indices[0] if int(neighbor) != int(pos)]
 
     def _plot_original_matrix(self, X):
         cols = [c for c in self.model_columns_ if c in X.columns]
@@ -2144,6 +2208,7 @@ class MIMIC(BaseEstimator, TransformerMixin):
             neighbour_mode="mutual",
             n_neighbors=5,
             lambda_range=(0.25, 0.75),
+            categorical_displacement=True,
         )
 
     @classmethod

@@ -13,6 +13,7 @@ class GenerationPolicy:
     lambda_range: tuple[float, float] = (0.0, 1.0)
     class_conditioned: bool = False
     cluster_conditioned: bool = False
+    categorical_displacement: bool = True
 
     def validate(self):
         if self.method not in {"smote", "displacement"}:
@@ -24,5 +25,7 @@ class GenerationPolicy:
         lo, hi = self.lambda_range
         if hi < lo:
             raise ValueError("lambda_range must be ordered as (low, high)")
+        if not isinstance(self.categorical_displacement, bool):
+            raise ValueError("categorical_displacement must be a bool")
         return self
 

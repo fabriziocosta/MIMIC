@@ -200,8 +200,14 @@ GenerationPolicy(
     neighbour_mode="mutual",
     n_neighbors=5,
     lambda_range=(0.25, 0.75),
+    categorical_displacement=True,
 )
 ```
+
+For categorical features, displacement switches `A` to `C` independently per
+feature with probability `clip(lambda, 0, 1)` when that feature has `A == B`;
+otherwise it preserves `A`. Set `categorical_displacement=False` to use the
+legacy decoded categorical values.
 
 ### `mode="identity"` / `mode=0`
 

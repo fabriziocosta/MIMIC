@@ -372,6 +372,20 @@ This is a hypothesis to be tested empirically. The method is attractive because 
 
 The decoding step can be deterministic or stochastic. A deterministic decoder maps the generated embedding to one predicted value per feature. A stochastic decoder instead treats the generated embedding as an initial state and samples feature values from learned conditional distributions.
 
+For mixed-type data, a categorical-aware displacement rule handles
+categorical columns in the decoded row using the same source triplet
+`(A, B, C)`. For each categorical column, it switches the generated value
+from `A` to `C` with probability `clip(lambda, 0, 1)` only when `A` and `B` have
+the same value for that feature. The check and Bernoulli switch draw are
+independent for each categorical feature: a mismatch on one feature does not
+prevent a switch on another. When they differ, that feature preserves `A`.
+Thus categorical values follow the displacement direction without
+interpolating category codes or
+one-hot coordinates. Conditioned columns remain fixed. This behavior is
+enabled by default (`GenerationPolicy(categorical_displacement=True)`). Set
+`categorical_displacement=False` to retain the decoder's ordinary categorical
+output.
+
 For the forest conditional sampler, each feature sampler uses:
 
 $$

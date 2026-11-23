@@ -36,6 +36,8 @@ dependencies = [
     "scikit-learn",
     "matplotlib",
     "imste>=0.8.10",
+    "rinnd>=0.3.1",
+    "pynndescent>=0.5.13",
     "torch",
     "tqdm",
 ]

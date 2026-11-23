@@ -5,6 +5,20 @@ from the section matching the package version and release tag.
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-23
+
+### Added
+
+- Add per-feature categorical-aware displacement as the default displacement
+  treatment, with `categorical_displacement=False` available for legacy output.
+- Accelerate larger embedding-space nearest-neighbor searches with RINND and
+  PyNNDescent, retaining exact scikit-learn search for small datasets and as a
+  fallback.
+
+### Changed
+
+- Declare RINND and PyNNDescent as direct runtime dependencies.
+
 ## [0.1.5] - 2026-11-22
 
 ### Added

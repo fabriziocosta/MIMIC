@@ -568,6 +568,7 @@ GenerationPolicy(
     lambda_range=(0.0, 1.0),
     class_conditioned=False,
     cluster_conditioned=False,
+    categorical_displacement=True,
 )
 ```
 
@@ -585,6 +586,18 @@ $$
 H_{\mathrm{new}} = H(A) + \lambda(H(C) - H(B))
 $$
 
+For mixed-type generation, `categorical_displacement=True` applies a separate
+discrete rule to each categorical column after decoding. This is enabled by
+default and can be disabled with `categorical_displacement=False` to restore
+the legacy decoder output. For each column
+independently, if its values satisfy `A == B`, the output switches from `A` to
+`C` with probability `clip(lambda, 0, 1)` using an independent Bernoulli draw; if
+`A != B`, that column keeps `A`. A mismatch in one column does not affect the
+decision for another. Missing values compare equal to one another, conditioned columns
+are left at their requested values, and continuous columns retain the ordinary
+decoded displacement result. Embedding trace rows record source row positions
+and the categorical switches when this rule is active.
+
 `neighbour_mode="normal"` uses ordinary nearest neighbours.
 
 `neighbour_mode="mutual"` requires the neighbour relation to hold in both directions:
@@ -594,6 +607,14 @@ B \in \mathcal{N}_k(A)
 \quad \text{and} \quad
 A \in \mathcal{N}_k(B)
 $$
+
+MIMIC uses an exact scikit-learn neighbor index for datasets of at most 128
+rows. For larger embedding sets, it prefers RINND and falls back to
+PyNNDescent; if neither approximate backend is usable, it uses exact
+scikit-learn search. The fitted training neighbor graph is reused during
+generation, while privacy-filter queries use the selected index's query API.
+Approximate indexes can change close-neighbor ties and privacy-filter counts
+slightly compared with exact search.
 
 For displacement, the minimal mutual-neighbour check should apply to `B` and `C`. A stricter later mode may also require `A` and `B` to be mutual neighbours.
 

@@ -66,6 +66,15 @@ preprocessed numeric coordinates. For categorical values, the decoded class is
 the class associated with the largest interpolated score. This is a
 feature-space baseline; it is not a conditional probability model.
 
+With the default `categorical_displacement=True`, categorical columns use the
+source triplet rule independently for each categorical feature: switch `A` to `C`
+with probability `clip(lambda, 0, 1)` when that feature's `A` and `B` match, and
+otherwise preserve `A` for that feature. Each matching feature gets its own
+Bernoulli draw, so a mismatch in one feature does not prevent a switch in
+another. Conditioned columns remain fixed. This post-decode rule avoids
+arithmetic on category codes or one-hot blocks. Set
+`categorical_displacement=False` to restore the legacy decoded category.
+
 ## Direct preset
 
 For each generated embedding <img src="assets/modes/equation-11.svg" alt="H^*=(h^*_1,\ldots,h^*_p)" style="vertical-align: middle;">, direct

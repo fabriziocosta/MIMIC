@@ -1418,6 +1418,81 @@ def test_regression_targets_are_decoded_on_original_scale():
     assert generated["y"].between(df["y"].min() - 100, df["y"].max() + 100).all()
 
 
+def test_categorical_aware_displacement_switches_only_matching_categories():
+    model = MIMIC(
+        columns={"classification": ["cat", "other", "label"]},
+        policy=GenerationPolicy(method="displacement", categorical_displacement=True),
+        random_state=3,
+    )
+    model.train_X_ = pd.DataFrame(
+        {
+            "cat": ["a", "a", "c"],
+            "other": ["x", "y", "z"],
+            "label": ["minority", "minority", "minority"],
+        }
+    )
+    model.classification_columns_ = ["cat", "other", "label"]
+    generated = pd.DataFrame({"cat": ["decoded"], "other": ["decoded"], "label": ["minority"]})
+    traces = [
+        {
+            "trace_type": "embedding",
+            "method": "displacement",
+            "sample_index": 0,
+            "anchor_position": 0,
+            "displacement_from_position": 1,
+            "displacement_to_position": 2,
+            "lambda": 1.0,
+        }
+    ]
+
+    model._apply_categorical_displacement(
+        generated, traces, condition={"label": "minority"}, rng=np.random.default_rng(3)
+    )
+
+    assert generated.loc[0, "cat"] == "c"  # A == B: take C at lambda 1.
+    assert generated.loc[0, "other"] == "x"  # A != B: preserve A.
+    assert generated.loc[0, "label"] == "minority"  # Conditioned columns stay fixed.
+
+
+def test_categorical_aware_displacement_is_default_with_legacy_opt_out():
+    assert GenerationPolicy(method="displacement").categorical_displacement is True
+    assert GenerationPolicy(
+        method="displacement", categorical_displacement=False
+    ).categorical_displacement is False
+
+
+def test_categorical_aware_displacement_is_applied_by_sample():
+    minority_categories = ["a", "a", "b", "b"] * 4
+    df = pd.DataFrame(
+        {
+            "category": minority_categories + ["a", "b"] * 8,
+            "label": ["minority"] * 16 + ["majority"] * 16,
+        }
+    )
+    model = MIMIC(
+        columns={"classification": ["category", "label"]},
+        encoder=IdentityEncoder(),
+        decoder=IdentityDecoder(),
+        policy=GenerationPolicy(
+            method="displacement", n_neighbors=3, lambda_range=(1.0, 1.0),
+            categorical_displacement=True,
+        ),
+        n_bootstrap=1,
+        random_state=11,
+    ).fit(df)
+
+    generated, trace = model.sample(12, condition={"label": "minority"}, return_trace=True)
+    embedding_trace = trace.loc[trace["trace_type"].eq("embedding")]
+    assert generated["label"].eq("minority").all()
+    assert embedding_trace["categorical_displacement_applied"].all()
+    for _, row in embedding_trace.iterrows():
+        a = model.train_X_.iloc[int(row["anchor_position"])]
+        b = model.train_X_.iloc[int(row["displacement_from_position"])]
+        c = model.train_X_.iloc[int(row["displacement_to_position"])]
+        expected = c["category"] if a["category"] == b["category"] else a["category"]
+        assert generated.iloc[int(row["sample_index"])]["category"] == expected
+
+
 def test_identity_encoder_decoder_generation_uses_full_row_context():
     rng = np.random.default_rng(7)
     df = pd.DataFrame(
